@@ -11,9 +11,9 @@ func DecodeHeader(buf []byte) (int64, int32, int32) {
 	return int64(timestamp), int32(key_size), int32(value_size)
 }
 
-func DecodeKeyValue(buf []byte) (int, string, string) {
+func DecodeKeyValue(buf []byte) (int64, string, string) {
 	timestamp, key_size, value_size := DecodeHeader(buf[:HEADER_SIZE])
 	key := string(buf[HEADER_SIZE : HEADER_SIZE+key_size])
 	value := string(buf[HEADER_SIZE+key_size : HEADER_SIZE+key_size+value_size])
-	return int(timestamp), key, value
+	return timestamp, key, value
 }

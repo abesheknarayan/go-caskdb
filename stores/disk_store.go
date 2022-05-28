@@ -29,14 +29,14 @@ type DiskStore struct {
 }
 
 // creates a new db and returns the object ref
-func InitDb(dbName string) (*DiskStore, error) {
+func InitDb(dbName string, path string) (*DiskStore, error) {
 
 	// if db is already present load it or else create new db
-	fileName := fmt.Sprintf("data/%s.db", dbName)
+	fileName := fmt.Sprintf("%s/%s.db", path, dbName)
 
 	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
 		fmt.Println("file doesn't exist !!")
-		return createDB(dbName)
+		return createDB(dbName, path)
 	}
 
 	// open file in binary + append mode
@@ -58,12 +58,14 @@ func InitDb(dbName string) (*DiskStore, error) {
 }
 
 // create new file
-func createDB(dbName string) (*DiskStore, error) {
-	filename := fmt.Sprintf("data/%s.db", dbName)
+func createDB(dbName string, path string) (*DiskStore, error) {
+	// path :=
+	filename := fmt.Sprintf("%s/%s.db", path, dbName)
 	fmt.Printf("creating new file %s\n", filename)
 	f, err := os.Create(filename)
 
 	if err != nil {
+		fmt.Println("here")
 		return nil, err
 	}
 
@@ -153,6 +155,15 @@ func (d *DiskStore) Get(key string) string {
 
 	_, _, value := format.DecodeKeyValue(dataByte)
 	return value
+}
+
+// clears the db file and hash index
+func (d *DiskStore) Cleanup() {
+	d.currentByteOffsetPosition = 0
+	for k := range d.hashIndex {
+		delete(d.hashIndex, k)
+	}
+	os.Remove(d.filename)
 }
 
 func (d *DiskStore) CloseDB() {
