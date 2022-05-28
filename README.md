@@ -7,10 +7,11 @@ Go-CaskDB is a disk-based, embedded, persistent, key-value store based on the [R
 ## Tasks
 - [x] Get, Set KV using disk as store
 - [x] Loading data from disk onto memory 
+- [x] testing
 - [ ] Support for generic key and values (right now only for strings)
 - [ ] Proper logging
 - [ ] need better way of handling bytes (very bad rn)
-- [ ] testing and benchmarks
+- [ ] Benchmarking
 - [ ] Crash Safety
 - [ ] Key Deletion
 - [ ] RB-tree to support range scans
