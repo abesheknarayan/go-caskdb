@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/abesheknarayan/go-caskdb/format"
+	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 // for now, support keys and values only with string type
@@ -31,12 +33,16 @@ type DiskStore struct {
 // creates a new db and returns the object ref
 func InitDb(dbName string, path string) (*DiskStore, error) {
 
+	var l = log.WithFields(logrus.Fields{
+		"method": "InitDb",
+	})
+
 	// if db is already present load it or else create new db
 	fileName := fmt.Sprintf("%s/%s.db", path, dbName)
 
 	if _, err := os.Stat(fileName); errors.Is(err, os.ErrNotExist) {
-		fmt.Println("file doesn't exist !!")
-		return createDB(dbName, path)
+		l.Infoln("file doesn't exist !!")
+		return createDb(dbName, path)
 	}
 
 	// open file in binary + append mode
@@ -58,14 +64,20 @@ func InitDb(dbName string, path string) (*DiskStore, error) {
 }
 
 // create new file
-func createDB(dbName string, path string) (*DiskStore, error) {
-	// path :=
+func createDb(dbName string, path string) (*DiskStore, error) {
+
+	var l = log.WithFields(logrus.Fields{
+		"method":       "createDb",
+		"param_dbName": dbName,
+		"param_path":   path,
+	})
+	l.Infoln("Attempting to create a database")
+
 	filename := fmt.Sprintf("%s/%s.db", path, dbName)
-	fmt.Printf("creating new file %s\n", filename)
+	l.Infof("creating new file %s\n", filename)
 	f, err := os.Create(filename)
 
 	if err != nil {
-		fmt.Println("here")
 		return nil, err
 	}
 
@@ -121,6 +133,14 @@ func (d *DiskStore) loadHashIndex() error {
 }
 
 func (d *DiskStore) Set(key string, value string) {
+
+	var l = log.WithFields(logrus.Fields{
+		"method":      "Set",
+		"param_key":   key,
+		"param_value": value,
+	})
+	l.Infof("Attempting to set a key")
+
 	// store to disk
 	timestamp := time.Now().Unix()
 	sz, data := format.EncodeKeyValue(timestamp, key, value)
@@ -141,6 +161,12 @@ func (d *DiskStore) writeWithSync(data []byte) {
 
 func (d *DiskStore) Get(key string) string {
 	// get key from db
+	var l = log.WithFields(logrus.Fields{
+		"method":    "Get",
+		"param_key": key,
+	})
+	l.Infoln("Attempting to get value for key")
+
 	kv, ok := d.hashIndex[key]
 	if !ok {
 		return ""
@@ -150,7 +176,7 @@ func (d *DiskStore) Get(key string) string {
 	n, err := d.file.Read(dataByte)
 
 	if err != nil || int32(n) != kv.size {
-		fmt.Println(err)
+		l.Errorln(err)
 	}
 
 	_, _, value := format.DecodeKeyValue(dataByte)
@@ -159,6 +185,11 @@ func (d *DiskStore) Get(key string) string {
 
 // clears the db file and hash index
 func (d *DiskStore) Cleanup() {
+	var l = log.WithFields(logrus.Fields{
+		"method": "Cleanup",
+	})
+	l.Infoln("Cleaning up the database")
+
 	d.currentByteOffsetPosition = 0
 	for k := range d.hashIndex {
 		delete(d.hashIndex, k)
@@ -167,6 +198,11 @@ func (d *DiskStore) Cleanup() {
 }
 
 func (d *DiskStore) CloseDB() {
+	var l = log.WithFields(logrus.Fields{
+		"method": "CloseDB",
+	})
+	l.Infoln("Closing the database")
+
 	d.file.Sync()
 	d.file.Close()
 }
