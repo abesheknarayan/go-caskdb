@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/abesheknarayan/go-caskdb/stores"
+	"github.com/abesheknarayan/go-caskdb/utils"
 	"github.com/joho/godotenv"
 )
 
@@ -14,6 +15,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load env file")
 	}
+	utils.InitLogger()
 	path := os.Getenv("DB_PATH")
 	booksDb, err := stores.InitDb("test", path)
 	if err != nil {
@@ -24,5 +26,5 @@ func main() {
 	booksDb.Set("movie", "top gun maverick")
 	fmt.Println(booksDb.Get("movie"))
 	booksDb.CloseDB()
-	// booksDb.Cleanup()
+	booksDb.Cleanup()
 }
