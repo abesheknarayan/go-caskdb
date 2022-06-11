@@ -7,17 +7,14 @@ Go-CaskDB is a disk-based, embedded, persistent, key-value store based on the [R
 ## Tasks
 - [x] Get, Set KV using disk as store
 - [x] Loading data from disk onto memory 
-- [x] testing
+- [x] Testing
 - [x] Proper logging
-- [ ] Support for generic key and values (right now only for strings)
-- [ ] need better way of handling bytes (very bad rn)
-- [ ] Benchmarking
-- [ ] Crash Safety
-- [ ] Key Deletion
-- [ ] RB-tree to support range scans
+- [ ] Key Deletion with Tombstone file
 - [ ] Split db file into several small files (implement merging compaction using go-routines)
-- [ ] Cache
-- [ ] Garbage Collector for removing old deleted keys
+- [ ] Crash Safety with WAL
+- [ ] RB-tree to support range scans
+- [ ] Benchmarking
+- [ ] Cache (LRU? EXPLORE!)
 - [ ] Distributed using Paxos or consistent hashing
 
 

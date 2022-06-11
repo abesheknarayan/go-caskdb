@@ -1,10 +1,10 @@
 package utils
 
 import (
+	"io"
 	"os"
 
 	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
 )
 
 // instance
@@ -13,12 +13,16 @@ var Logger *logrus.Logger
 func InitLogger() {
 	var (
 		filename = "./logs/dblogs.log"
-		loglevel = log.DebugLevel
+		loglevel = logrus.DebugLevel
 	)
-	log.SetLevel(loglevel)
+	logrus.SetLevel(loglevel)
+	logrus.SetFormatter(&logrus.TextFormatter{
+		ForceColors: true,
+	})
 	f, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
-		log.Fatalf(err.Error())
+		logrus.Fatalf(err.Error())
 	}
-	log.SetOutput(f)
+	mw := io.MultiWriter(f, os.Stdout)
+	logrus.SetOutput(mw)
 }

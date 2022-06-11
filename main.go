@@ -3,28 +3,33 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 
-	"github.com/abesheknarayan/go-caskdb/stores"
-	"github.com/abesheknarayan/go-caskdb/utils"
-	"github.com/joho/godotenv"
+	config "github.com/abesheknarayan/go-caskdb/pkg/config"
+	store "github.com/abesheknarayan/go-caskdb/pkg/disk_store"
+	utils "github.com/abesheknarayan/go-caskdb/pkg/utils"
 )
 
 func main() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatalf("failed to load env file")
-	}
+
+	config.LoadConfigFromEnv()
 	utils.InitLogger()
-	path := os.Getenv("DB_PATH")
-	booksDb, err := stores.InitDb("test", path)
+
+	booksDb, err := store.InitDb("test")
 	if err != nil {
-		fmt.Println(err)
+		log.Fatalf("Failed to initialize DB %v", err)
 	}
-	booksDb.Set("name", "abeshek")
-	fmt.Println(booksDb.Get("name"))
-	booksDb.Set("movie", "top gun maverick")
-	fmt.Println(booksDb.Get("movie"))
+
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key %d", i)
+		value := fmt.Sprintf("val %d", i)
+		booksDb.Put(key, value)
+	}
+
+	fmt.Println(booksDb.Get("key 678"))
+	fmt.Println(booksDb.Get("key 12"))
+
+	fmt.Println(booksDb.Get("key 999"))
+
 	booksDb.CloseDB()
 	booksDb.Cleanup()
 }
