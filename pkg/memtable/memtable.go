@@ -11,8 +11,8 @@ import (
 	CustomError "github.com/abesheknarayan/go-caskdb/pkg/error"
 	"github.com/abesheknarayan/go-caskdb/pkg/format"
 	KeyEntry "github.com/abesheknarayan/go-caskdb/pkg/key_entry"
+	"github.com/abesheknarayan/go-caskdb/pkg/utils"
 	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
 )
 
 /*
@@ -75,7 +75,7 @@ func (mt *MemTable) Put(key string, value string) error {
 
 func (mt *MemTable) LoadFromSegmentFile() error {
 
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "LoadFromSegmentFile",
 	})
 	l.Infof("Attempting to load segment file %d of db %s", mt.SegmentNumber, mt.DbName)
@@ -138,7 +138,7 @@ func (mt *MemTable) LoadFromSegmentFile() error {
 
 func (mt *MemTable) WriteMemtableToDisk() error {
 
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
 	})
 	l.Info("Writing Memtable to Segment file !!")

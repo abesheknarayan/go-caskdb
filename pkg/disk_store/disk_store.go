@@ -11,8 +11,8 @@ import (
 	CustomError "github.com/abesheknarayan/go-caskdb/pkg/error"
 	KeyEntry "github.com/abesheknarayan/go-caskdb/pkg/key_entry"
 	"github.com/abesheknarayan/go-caskdb/pkg/memtable"
+	"github.com/abesheknarayan/go-caskdb/pkg/utils"
 	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
 )
 
 // // for now, support keys and values only with string type
@@ -34,7 +34,7 @@ type DiskStore struct {
 // creates a new db and returns the object ref
 func InitDb(dbName string) (*DiskStore, error) {
 
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "InitDb",
 	})
 
@@ -101,7 +101,7 @@ func InitDb(dbName string) (*DiskStore, error) {
 
 func LoadManifest(f *os.File) *Manifest {
 
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "LoadManifest",
 	})
 
@@ -120,7 +120,7 @@ func LoadManifest(f *os.File) *Manifest {
 // create new file
 func createDb(dbName string, dbPath string) (*DiskStore, error) {
 
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method":       "createDb",
 		"param_dbName": dbName,
 		"param_path":   dbPath,
@@ -165,7 +165,7 @@ func createDb(dbName string, dbPath string) (*DiskStore, error) {
 
 func (d *DiskStore) Put(key string, value string) {
 
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method":      "Set",
 		"param_key":   key,
 		"param_value": value,
@@ -190,7 +190,7 @@ func (d *DiskStore) Put(key string, value string) {
 }
 
 func (d *DiskStore) Get(key string) string {
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method":    "Get",
 		"param_key": key,
 	})
@@ -211,7 +211,7 @@ func (d *DiskStore) Get(key string) string {
 
 func (d *DiskStore) CheckAllSegmentsOneByOne(key string, segmentNumber uint32) (string, error) {
 
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method":              "CheckAllSegmentsOneByOne",
 		"param_key":           key,
 		"param_segmentNumber": segmentNumber,
@@ -235,29 +235,24 @@ func (d *DiskStore) CheckAllSegmentsOneByOne(key string, segmentNumber uint32) (
 
 // clears the db
 func (d *DiskStore) Cleanup() {
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "Cleanup",
 	})
 	l.Infoln("Cleaning up the database")
+	d.Manifest.NumberOfSegments = 0
 
-	// modify manifest file alone and remove all other segment files
+	// delete everything including manifest file
 
 	path := config.Config.Path
-
-	for d.Manifest.NumberOfSegments > 0 {
-		segmentFilePath := fmt.Sprintf("%s/%s/seg_%d.seg", path, d.Manifest.DbName, d.Manifest.NumberOfSegments)
-		err := os.Remove(segmentFilePath)
-		if err != nil {
-			l.Errorf("Error while deleting segment file %s , %v", segmentFilePath, err)
-		}
-		d.Manifest.NumberOfSegments -= 1
+	dirPath := fmt.Sprintf("%s/%s", path, d.Manifest.DbName)
+	err := os.RemoveAll(dirPath)
+	if err != nil {
+		l.Errorln(err)
 	}
-	d.ChangeManifestFileContent(0)
-
 }
 
 func (d *DiskStore) ChangeManifestFileContent(numberOfSegments uint32) {
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method":                 "ChangeManifestFileContent",
 		"param_numberOfSegments": numberOfSegments,
 	})
@@ -283,11 +278,12 @@ func (d *DiskStore) ChangeManifestFileContent(numberOfSegments uint32) {
 
 // Deletes the contents of memtable
 func (d *DiskStore) CloseDB() {
-	var l = log.WithFields(logrus.Fields{
+	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "CloseDB",
 	})
 	l.Infoln("Closing the database")
 
-	// just clear memtable
+	// write memtable to segment file and clear it
+	d.Memtable.WriteMemtableToDisk()
 	d.Memtable.Clear()
 }

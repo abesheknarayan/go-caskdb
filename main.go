@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 
 	config "github.com/abesheknarayan/go-caskdb/pkg/config"
 	store "github.com/abesheknarayan/go-caskdb/pkg/disk_store"
@@ -19,16 +20,12 @@ func main() {
 		log.Fatalf("Failed to initialize DB %v", err)
 	}
 
-	for i := 0; i < 1000; i++ {
-		key := fmt.Sprintf("key %d", i)
-		value := fmt.Sprintf("val %d", i)
+	for i := 0; i < 10; i++ {
+		key := utils.GetRandomString(rand.Int()%10 + 1)
+		value := utils.GetRandomString(rand.Int()%10 + 1)
+		fmt.Println(key, value)
 		booksDb.Put(key, value)
 	}
-
-	fmt.Println(booksDb.Get("key 678"))
-	fmt.Println(booksDb.Get("key 12"))
-
-	fmt.Println(booksDb.Get("key 999"))
 
 	booksDb.CloseDB()
 	booksDb.Cleanup()

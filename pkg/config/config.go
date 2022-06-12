@@ -1,33 +1,47 @@
 package config
 
 import (
+	"flag"
+	"fmt"
+	"log"
 	"os"
 
 	"github.com/joho/godotenv"
-	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
 )
 
 type ConfigStruct struct {
-	Path string
+	Stage string // Dev || Prod || Test
+	Path  string
 }
 
 var Config *ConfigStruct
 
+// for go tests
+func (c *ConfigStruct) SetConfig(path string) {
+	c.Path = path
+}
+
 func LoadConfigFromEnv() {
 
-	var l = log.WithFields(logrus.Fields{
-		"method": "LoadConfigFromEnv",
-	})
-	err := godotenv.Load(".env")
-
-	if err != nil {
-		l.Fatalf("Failed to load env %v", err)
+	stage, exists := os.LookupEnv("CASKDB_ENV")
+	var path string
+	if !exists {
+		if flag.Lookup("test.v") != nil {
+			// in testing
+			stage = "Test"
+		} else {
+			stage = "Dev"
+			err := godotenv.Load(".env")
+			if err != nil {
+				log.Fatalf("Failed to load env %v", err)
+			}
+			path, _ = os.LookupEnv("DB_PATH") // will be empty if DB_PATH is empty [In case of tests above func will be used to set path]
+		}
 	}
-
-	path := os.Getenv("DB_PATH")
-
 	Config = &ConfigStruct{
-		Path: path,
+		Stage: stage,
+		Path:  path,
 	}
+	fmt.Println(Config)
+
 }

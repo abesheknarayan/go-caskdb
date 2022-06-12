@@ -2,8 +2,10 @@ package utils
 
 import (
 	"io"
+	"log"
 	"os"
 
+	"github.com/abesheknarayan/go-caskdb/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -15,14 +17,43 @@ func InitLogger() {
 		filename = "./logs/dblogs.log"
 		loglevel = logrus.DebugLevel
 	)
-	logrus.SetLevel(loglevel)
-	logrus.SetFormatter(&logrus.TextFormatter{
+	Logger = &logrus.Logger{
+		Formatter: &logrus.JSONFormatter{},
+	}
+	Logger.SetLevel(loglevel)
+	Logger.SetFormatter(&logrus.TextFormatter{
 		ForceColors: true,
 	})
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0666)
-	if err != nil {
-		logrus.Fatalf(err.Error())
+
+	// get env and choose accordingly
+
+	var writer io.Writer
+
+	var f *os.File
+
+	if config.Config.Stage != "Test" {
+		var err error
+		f, err = os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0666)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
 	}
-	mw := io.MultiWriter(f, os.Stdout)
-	logrus.SetOutput(mw)
+
+	switch config.Config.Stage {
+	case "Dev":
+		{
+			writer = io.MultiWriter(f, os.Stdout)
+		}
+	case "Test":
+		{
+			writer = os.Stdout
+		}
+	case "Prod":
+		{
+			writer = f
+		}
+	}
+
+	Logger.SetOutput(writer)
+
 }
