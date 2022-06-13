@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/abesheknarayan/go-caskdb/pkg/config"
@@ -129,10 +130,6 @@ func (mt *MemTable) LoadFromSegmentFile() error {
 		}
 		mt.Memtable[key] = kv
 	}
-
-	// l.Debugf("Printing memtable for segment file %d", mt.SegmentNumber)
-	// l.Debugln(mt.Memtable)
-
 	return nil
 }
 
@@ -156,11 +153,23 @@ func (mt *MemTable) WriteMemtableToDisk() error {
 	// truncate the file
 	f.Truncate(0)
 
+	// Golang map doesnt print the elements in the order of sorted keys
+	// Get all keys, sort it yourself and then retrieve the corresponding values from map
+
+	sortedKeys := []string{}
+
+	for key := range mt.Memtable {
+		sortedKeys = append(sortedKeys, key)
+	}
+
+	sort.Strings(sortedKeys)
+
 	// write the map contents as bytes
 	var bytesArr []byte
 
-	for key, key_entry := range mt.Memtable {
-		_, data := format.EncodeKeyValue(key_entry.Timestamp, key, key_entry.Value)
+	for _, key := range sortedKeys {
+		kv := mt.Memtable[key]
+		_, data := format.EncodeKeyValue(kv.Timestamp, key, kv.Value)
 		bytesArr = append(bytesArr, data...)
 	}
 
