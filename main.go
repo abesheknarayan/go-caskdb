@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"runtime"
 
 	config "github.com/abesheknarayan/go-caskdb/pkg/config"
 	store "github.com/abesheknarayan/go-caskdb/pkg/disk_store"
@@ -14,12 +15,14 @@ func main() {
 	config.LoadConfigFromEnv()
 	utils.InitLogger()
 
-	booksDb, err := store.InitDb("test")
+	runtime.GOMAXPROCS(2)
+
+	booksDb, err := store.InitDb("test1")
 	if err != nil {
 		log.Fatalf("Failed to initialize DB %v", err)
 	}
 
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 1000; i++ {
 		// key := utils.GetRandomString(rand.Int()%10 + 1)
 		// value := utils.GetRandomString(rand.Int()%10 + 1)
 		key := fmt.Sprintf("Key %d", i+1)
@@ -28,6 +31,13 @@ func main() {
 		booksDb.Put(key, value)
 	}
 
+	utils.Logger.Debugln(booksDb.Get("Key 123"))
+	utils.Logger.Debugln(booksDb.Get("Key 33"))
+
+	utils.Logger.Debugln(booksDb.Get("Key 477"))
+	utils.Logger.Debugln(booksDb.Get("Key 1"))
+	utils.Logger.Debugln(booksDb.Get("Key 930"))
+
 	booksDb.CloseDB()
-	// booksDb.Cleanup()
+	booksDb.Cleanup()
 }

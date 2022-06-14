@@ -15,7 +15,8 @@ Go-CaskDB is a disk-based, embedded, persistent, key-value store based on the [R
 - [ ] Crash Safety with WAL
 - [ ] RB-tree to support range scans
 - [ ] Benchmarking
-- [ ] Cache (LRU? EXPLORE!)
+- [ ] Cache (Block + Table)
+- [ ] Bloom filter for fast non-existent key reads
 - [ ] Distributed using Paxos or consistent hashing
 
 
