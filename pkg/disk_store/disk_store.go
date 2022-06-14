@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"sync"
 
 	"github.com/abesheknarayan/go-caskdb/pkg/config"
 	CustomError "github.com/abesheknarayan/go-caskdb/pkg/error"
@@ -24,10 +25,15 @@ type SegmentMetadata struct {
 	Cardinality uint32 // no of keys it contains
 }
 
+type SegmentWithMutex struct {
+	Mu       sync.Mutex // to prevent data race among one writing to file and another reading from file
+	Segments []SegmentMetadata
+}
+
 // contains the metdata of DB
 type Manifest struct {
 	DbName   string
-	Segments []SegmentMetadata // should always be sorted according to SegmentId
+	Segments SegmentWithMutex // should always be sorted according to SegmentId
 }
 
 type HashIndex map[string]KeyEntry.KeyEntry
@@ -86,11 +92,11 @@ func InitDb(dbName string) (*DiskStore, error) {
 		ManifestFile:      f,
 		HashIndex:         HashIndex{},
 		Memtable:          memtable.GetNewMemTable(dbName),
-		AuxillaryMemtable: nil,
+		AuxillaryMemtable: memtable.GetNewMemTable(dbName),
 	}
 
 	// load the most recent segment file onto memtable
-	d.Memtable.LoadFromSegmentFile(d.Manifest.Segments[len(d.Manifest.Segments)-1].SegmentId)
+	d.Memtable.LoadFromSegmentFile(d.Manifest.Segments.Segments[len(d.Manifest.Segments.Segments)-1].SegmentId)
 
 	// TODO
 	// d.loadHashIndex()
@@ -137,7 +143,7 @@ func createDb(dbName string, dbPath string) (*DiskStore, error) {
 
 	manifest := &Manifest{
 		DbName:   dbName,
-		Segments: []SegmentMetadata{},
+		Segments: SegmentWithMutex{},
 	}
 
 	if err != nil {
@@ -152,7 +158,7 @@ func createDb(dbName string, dbPath string) (*DiskStore, error) {
 		ManifestFile:      manifestFile,
 		HashIndex:         HashIndex{},
 		Memtable:          memtable.GetNewMemTable(dbName),
-		AuxillaryMemtable: nil,
+		AuxillaryMemtable: memtable.GetNewMemTable(dbName),
 	}
 
 	// TODO
@@ -198,10 +204,12 @@ func (d *DiskStore) Put(key string, value string) {
 			if err != nil {
 				l.Fatalln(err)
 			}
-			d.Manifest.Segments = append(d.Manifest.Segments, SegmentMetadata{
+			d.Manifest.Segments.Mu.Lock()
+			d.Manifest.Segments.Segments = append(d.Manifest.Segments.Segments, SegmentMetadata{
 				SegmentId:   segmentId,
 				Cardinality: cardinality,
 			})
+			d.Manifest.Segments.Mu.Unlock()
 			d.ChangeNumberOfSegmentsInManifest()
 			d.AuxillaryMemtable.Wg.Done()
 		}()
@@ -222,21 +230,20 @@ func (d *DiskStore) Get(key string) string {
 	if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
 		// check auxillary memtable
 
-		if d.AuxillaryMemtable != nil {
+		value, err = d.AuxillaryMemtable.Get(key)
 
-			value, err = d.AuxillaryMemtable.Get(key)
+		if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
+			// check all the segments one by one from the most recent
+
+			d.Manifest.Segments.Mu.Lock()
+			value, err = d.CheckAllSegmentsOneByOne(key, int(len(d.Manifest.Segments.Segments)-1))
+			d.Manifest.Segments.Mu.Unlock()
 
 			if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
-				// check all the segments one by one from the most recent
-
-				value, err = d.CheckAllSegmentsOneByOne(key, int(len(d.Manifest.Segments)-1))
-
-				if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
-					return ""
-				}
+				return ""
 			}
-			return value
 		}
+		return value
 	}
 
 	return value
@@ -244,10 +251,14 @@ func (d *DiskStore) Get(key string) string {
 
 // Returns the most recent segment id plus 1 from the disk store
 func (d *DiskStore) GetNewSegmentId() uint32 {
-	if len(d.Manifest.Segments) == 0 {
+	d.Manifest.Segments.Mu.Lock()
+	defer func() {
+		d.Manifest.Segments.Mu.Unlock()
+	}()
+	if len(d.Manifest.Segments.Segments) == 0 {
 		return 1
 	}
-	return d.Manifest.Segments[len(d.Manifest.Segments)-1].SegmentId + 1
+	return d.Manifest.Segments.Segments[len(d.Manifest.Segments.Segments)-1].SegmentId + 1
 }
 
 func (d *DiskStore) CheckAllSegmentsOneByOne(key string, segmentIndex int) (string, error) {
@@ -263,7 +274,7 @@ func (d *DiskStore) CheckAllSegmentsOneByOne(key string, segmentIndex int) (stri
 	l.Infof("Attempting to check segment file %d for key %s", segmentIndex, key)
 
 	memtable := memtable.GetNewMemTable(d.Manifest.DbName)
-	memtable.LoadFromSegmentFile(d.Manifest.Segments[segmentIndex].SegmentId)
+	memtable.LoadFromSegmentFile(d.Manifest.Segments.Segments[segmentIndex].SegmentId)
 
 	value, err := memtable.Get(key)
 	if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
@@ -282,7 +293,9 @@ func (d *DiskStore) Cleanup() {
 	l.Infoln("Cleaning up the database")
 
 	// clear the segments slice
-	d.Manifest.Segments = d.Manifest.Segments[:0]
+	d.Manifest.Segments.Mu.Lock()
+	d.Manifest.Segments.Segments = d.Manifest.Segments.Segments[:0]
+	d.Manifest.Segments.Mu.Unlock()
 
 	// delete everything including manifest file
 
@@ -331,10 +344,12 @@ func (d *DiskStore) CloseDB() {
 	if err != nil {
 		l.Fatalf("Error while writing memtable to disk %v", err)
 	}
-	d.Manifest.Segments = append(d.Manifest.Segments, SegmentMetadata{
+	d.Manifest.Segments.Mu.Lock()
+	d.Manifest.Segments.Segments = append(d.Manifest.Segments.Segments, SegmentMetadata{
 		SegmentId:   segmentId,
 		Cardinality: cardinality,
 	})
+	d.Manifest.Segments.Mu.Unlock()
 	d.ChangeNumberOfSegmentsInManifest()
 	d.Memtable.Clear()
 
