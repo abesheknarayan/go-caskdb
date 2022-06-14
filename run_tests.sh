@@ -1,6 +1,6 @@
 echo "...running unit tests..."
 export CASKDB_ENV=Test
-go test -run="^(Test|Benchmark)[^_](.*)" ./... 
+go test -race -run="^(Test|Benchmark)[^_](.*)" ./... 
 code=$?
 
 if [ $code -ne 0 ]; then
@@ -11,7 +11,7 @@ printf "\nUnit Tests complete. Performing Integration Tests now.\n"
 
 echo "...running integration tests..."
 
-go test -v -run="^(Test|Benchmark)_(.*)" ./...
+go test -v -race -run="^(Test|Benchmark)_(.*)" ./...
 code=$?
 
 exit $code

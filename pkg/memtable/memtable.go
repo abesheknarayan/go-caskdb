@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/abesheknarayan/go-caskdb/pkg/config"
@@ -31,17 +32,17 @@ const MAXSIZE uint64 = 4 * 1024
 type MemTable struct {
 	DbName        string
 	BytesOccupied uint64 // total nunber of bytes occupied
-	SegmentNumber uint32
 	Memtable      HashMap
+	Wg            *sync.WaitGroup
 }
 
-func GetNewMemTable(dbName string, segmentNumber uint32) *MemTable {
+func GetNewMemTable(dbName string) *MemTable {
 
 	memtable := &MemTable{
 		DbName:        dbName,
 		BytesOccupied: 0,
-		SegmentNumber: segmentNumber,
 		Memtable:      make(HashMap),
+		Wg:            &sync.WaitGroup{},
 	}
 
 	return memtable
@@ -74,21 +75,16 @@ func (mt *MemTable) Put(key string, value string) error {
 	return nil
 }
 
-func (mt *MemTable) LoadFromSegmentFile() error {
+func (mt *MemTable) LoadFromSegmentFile(segmentId uint32) error {
 
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "LoadFromSegmentFile",
 	})
-	l.Infof("Attempting to load segment file %d of db %s", mt.SegmentNumber, mt.DbName)
-
-	if mt.SegmentNumber == 0 {
-		// no prior segment files present
-		return nil
-	}
+	l.Infof("Attempting to load segment file with id %d of db %s", segmentId, mt.DbName)
 
 	path := config.Config.Path
 
-	segmentFilePath := fmt.Sprintf("%s/%s/seg_%d.seg", path, mt.DbName, mt.SegmentNumber)
+	segmentFilePath := fmt.Sprintf("%s/%s/%d.seg", path, mt.DbName, segmentId)
 
 	f, err := os.Open(segmentFilePath)
 
@@ -133,7 +129,8 @@ func (mt *MemTable) LoadFromSegmentFile() error {
 	return nil
 }
 
-func (mt *MemTable) WriteMemtableToDisk() error {
+// returns the (written segment file name, timestamp, cardinality of segment) along with error
+func (mt *MemTable) WriteMemtableToDisk(segmentId uint32) (uint32, error) {
 
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
@@ -142,12 +139,15 @@ func (mt *MemTable) WriteMemtableToDisk() error {
 
 	path := config.Config.Path
 
-	segmentFilePath := fmt.Sprintf("%s/%s/seg_%d.seg", path, mt.DbName, mt.SegmentNumber)
+	segmentFileName := fmt.Sprintf("%d.seg", segmentId)
+
+	segmentFilePath := fmt.Sprintf("%s/%s/%s", path, mt.DbName, segmentFileName)
 
 	f, err := os.OpenFile(segmentFilePath, os.O_RDWR|os.O_CREATE, 0666)
 
 	if err != nil {
 		l.Errorf("Error in opening segment file %s : %v", segmentFilePath, err)
+		return 0, nil
 	}
 
 	// truncate the file
@@ -177,7 +177,9 @@ func (mt *MemTable) WriteMemtableToDisk() error {
 	f.Sync() // to flush from OS buffer to disk
 	f.Close()
 
-	return nil
+	l.Debugf("Successfully written memtable to segfile %s with cardinality: %d", segmentFileName, uint32(len(sortedKeys)))
+
+	return uint32(len(sortedKeys)), nil
 }
 
 // Clears the memtable

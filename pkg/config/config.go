@@ -10,8 +10,9 @@ import (
 )
 
 type ConfigStruct struct {
-	Stage string // Dev || Prod || Test
-	Path  string
+	Stage                string // Dev || Prod || Test
+	Path                 string
+	MergeCompactionLimit uint32
 }
 
 var Config *ConfigStruct
@@ -39,8 +40,9 @@ func LoadConfigFromEnv() {
 		}
 	}
 	Config = &ConfigStruct{
-		Stage: stage,
-		Path:  path,
+		Stage:                stage,
+		Path:                 path,
+		MergeCompactionLimit: NUMBER_OF_SEGMENTS_FOR_MERGE_COMPACTION,
 	}
 	fmt.Println(Config)
 
