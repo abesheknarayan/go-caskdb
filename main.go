@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"runtime"
 
 	config "github.com/abesheknarayan/go-caskdb/pkg/config"
 	store "github.com/abesheknarayan/go-caskdb/pkg/disk_store"
@@ -14,8 +13,6 @@ func main() {
 
 	config.LoadConfigFromEnv()
 	utils.InitLogger()
-
-	runtime.GOMAXPROCS(2)
 
 	booksDb, err := store.InitDb("test1")
 	if err != nil {
