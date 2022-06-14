@@ -74,6 +74,9 @@ Mostly contains stuff where I debate with myself on which design / lib / ... is 
 - But zap is json-like (not very good looking for devevelopment purpose)
 - Removing zap and going on with logrus (may come back later for production level logs)
 
+## Data race here, data race there, data race everywhere :)
+- Should think about properly preventing data races
+- Right now just used sync.Mutex but there are other options as sync.RWMutex --> should check if this would replace normal Mutex and enhance performance
 
 
 
