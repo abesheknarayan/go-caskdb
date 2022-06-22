@@ -173,6 +173,7 @@ func (mt *MemTable) WriteMemtableToDisk(segmentId uint32) (uint32, error) {
 		bytesArr = append(bytesArr, data...)
 	}
 
+	// go-routine switch happens here
 	f.Write(bytesArr)
 	f.Sync() // to flush from OS buffer to disk
 	f.Close()
