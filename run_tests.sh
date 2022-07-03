@@ -1,5 +1,6 @@
 echo "...running unit tests..."
 export CASKDB_ENV=Test
+mkdir logs/
 mkdir logs/test/
 go test -race -run="^(Test|Benchmark)[^_](.*)" ./... > logs/test/unit.log
 code=$?
