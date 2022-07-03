@@ -22,18 +22,22 @@ import (
 // contains the metadata of segment files which goes in the manifest file
 type SegmentMetadata struct {
 	SegmentId   uint32
-	Cardinality uint32 // no of keys it contains
+	Cardinality uint32      // no of keys it contains
+	Mu          *sync.Mutex `json:"-"`
 }
 
-type ManifestData struct {
-	DbName   string
-	Segments []SegmentMetadata // should always be sorted according to SegmentId
+type SegmentLevelMetadata struct {
+	Segments []SegmentMetadata
+	Mu       *sync.Mutex `json:"-"`
 }
 
 // contains the metdata of DB
 type Manifest struct {
-	ManifestData ManifestData
-	Mu           *sync.Mutex
+	DbName         string
+	NumberOfLevels uint32                 // levels start from 0 to NumberOfLevels - 1
+	SegmentLevels  []SegmentLevelMetadata // should always be sorted according to SegmentId
+	MaxSegmentId   uint32                 // maximum segmend id of all segments to get newer segment ids easily
+	Mu             *sync.Mutex            `json:"-"` // omit the field for json
 }
 
 type HashIndex map[string]KeyEntry.KeyEntry
@@ -44,6 +48,8 @@ type DiskStore struct {
 	HashIndex         HashIndex // map of any value type
 	Memtable          *memtable.MemTable
 	AuxillaryMemtable *memtable.MemTable // memtable is copied to this while its being written asynchronously to disk
+	MergeCompactor    []MergeCompactor
+	MergeCompactorWg  *sync.WaitGroup
 }
 
 // creates a new db and returns the object ref
@@ -92,13 +98,29 @@ func InitDb(dbName string) (*DiskStore, error) {
 		Manifest:          manifest,
 		ManifestFile:      f,
 		HashIndex:         HashIndex{},
-		Memtable:          memtable.GetNewMemTable(dbName),
-		AuxillaryMemtable: memtable.GetNewMemTable(dbName),
+		Memtable:          memtable.GetNewMemTable(dbName, int32(manifest.MaxSegmentId)),
+		AuxillaryMemtable: nil,
+		MergeCompactor:    []MergeCompactor{},
+		MergeCompactorWg:  &sync.WaitGroup{},
+	}
+
+	// initiate sync.Mutex locks for segement leveels and segments
+	for i := 0; i < int(d.Manifest.NumberOfLevels); i++ {
+		d.Manifest.SegmentLevels[i].Mu = &sync.Mutex{}
+
+		for j := 0; j < len(d.Manifest.SegmentLevels[i].Segments); j++ {
+			d.Manifest.SegmentLevels[i].Segments[j].Mu = &sync.Mutex{}
+		}
 	}
 
 	// load the most recent segment file onto memtable
-	l.Debugln(d.Manifest.ManifestData)
-	d.Memtable.LoadFromSegmentFile(d.Manifest.ManifestData.Segments[len(d.Manifest.ManifestData.Segments)-1].SegmentId)
+	l.Debugln(d.Manifest)
+
+	// TODO
+	// load the level 0 segment file if it exists
+	if d.Manifest.NumberOfLevels > 0 {
+		d.Memtable.LoadFromSegmentFile(d.Manifest.SegmentLevels[0].Segments[len(d.Manifest.SegmentLevels[0].Segments)-1].SegmentId)
+	}
 
 	// TODO
 	// d.loadHashIndex()
@@ -112,19 +134,17 @@ func LoadManifest(f *os.File) *Manifest {
 		"method": "LoadManifest",
 	})
 
-	manifestData := &ManifestData{}
+	manifest := &Manifest{}
+
 	content, err := io.ReadAll(f)
 
 	if err != nil {
 		l.Errorln(err)
 	}
 
-	json.Unmarshal(content, &manifestData)
+	json.Unmarshal(content, &manifest)
 
-	manifest := &Manifest{
-		ManifestData: *manifestData,
-		Mu:           &sync.Mutex{},
-	}
+	manifest.Mu = &sync.Mutex{}
 
 	return manifest
 }
@@ -149,11 +169,11 @@ func createDb(dbName string, dbPath string) (*DiskStore, error) {
 	}
 
 	manifest := &Manifest{
-		ManifestData: ManifestData{
-			DbName:   dbName,
-			Segments: []SegmentMetadata{},
-		},
-		Mu: &sync.Mutex{},
+		DbName:         dbName,
+		NumberOfLevels: 0,
+		MaxSegmentId:   0,
+		SegmentLevels:  []SegmentLevelMetadata{},
+		Mu:             &sync.Mutex{},
 	}
 
 	if err != nil {
@@ -167,8 +187,10 @@ func createDb(dbName string, dbPath string) (*DiskStore, error) {
 		Manifest:          manifest,
 		ManifestFile:      manifestFile,
 		HashIndex:         HashIndex{},
-		Memtable:          memtable.GetNewMemTable(dbName),
-		AuxillaryMemtable: memtable.GetNewMemTable(dbName),
+		Memtable:          memtable.GetNewMemTable(dbName, 1),
+		AuxillaryMemtable: nil,
+		MergeCompactor:    []MergeCompactor{},
+		MergeCompactorWg:  &sync.WaitGroup{},
 	}
 
 	// TODO
@@ -197,34 +219,59 @@ func (d *DiskStore) Put(key string, value string) {
 		// Important point to note here is that, during the time between auxillary go routine waiting to write to this step in the next run, all writes and reads are supported using memtable and aux memtable so no issues with reads and writes
 		if d.AuxillaryMemtable != nil {
 			l.Debugln("Waiting for aux memtable write to disk to finish")
+			// d.AuxillaryMemtable.Mu.Lock()
 			d.AuxillaryMemtable.Wg.Wait()
+			// d.AuxillaryMemtable.Mu.Unlock()
+
 		}
 		l.Debugln("Writing memtable to aux")
 		d.AuxillaryMemtable = d.Memtable
-		d.Memtable = memtable.GetNewMemTable(d.Manifest.ManifestData.DbName)
+		d.Memtable = memtable.GetNewMemTable(d.Manifest.DbName, int32(d.GetNewSegmentId()))
 
-		// main go-routine from where i'm calling
 		go func() {
 			// find segment id
 			l.Debugln("Writing Auxillary memtable to disk")
 			l.Debugln(d.AuxillaryMemtable)
 			d.AuxillaryMemtable.Wg.Add(1)
-			segmentId := d.GetNewSegmentId()
-			cardinality, err := d.AuxillaryMemtable.WriteMemtableToDisk(segmentId) // this is the writing to disk function
+			// d.AuxillaryMemtable.Mu.Lock()
+			l.Debugln("Came here 2")
+
+			// TODO trigger compaction for level 0 to 1 specially here
+			if d.Manifest.NumberOfLevels > 0 {
+				// SegmentId - 1 is the last updated level 0 segment's id, pushing it to level 1
+				d.AddSegmentToLevelAndPerformCompaction(1)
+			} else {
+				d.Manifest.Mu.Lock()
+				d.Manifest.NumberOfLevels = 1
+				d.Manifest.SegmentLevels = append(d.Manifest.SegmentLevels, SegmentLevelMetadata{
+					Segments: []SegmentMetadata{},
+					Mu:       &sync.Mutex{},
+				})
+				d.InitMergeCompactor(0)
+				d.Manifest.Mu.Unlock()
+			}
+			l.Debugln("Came here")
+
+			// send a compaction signal to level 0 channel which will be listening somewhere
+			cardinality, err := d.AuxillaryMemtable.WriteMemtableToDisk() // this is the writing to disk function
 			if err != nil {
 				l.Fatalln(err)
 			}
+
 			d.Manifest.Mu.Lock()
-			d.Manifest.ManifestData.Segments = append(d.Manifest.ManifestData.Segments, SegmentMetadata{
-				SegmentId:   segmentId,
+
+			d.Manifest.SegmentLevels[0].Segments = append(d.Manifest.SegmentLevels[0].Segments, SegmentMetadata{
+				SegmentId:   uint32(d.Memtable.SegmentId),
 				Cardinality: cardinality,
+				Mu:          &sync.Mutex{},
 			})
 			d.Manifest.Mu.Unlock()
 			d.ChangeNumberOfSegmentsInManifest()
 			d.AuxillaryMemtable.Wg.Done()
+			// d.AuxillaryMemtable.Mu.Unlock()
 		}()
 
-		// again call
+		// again call Put
 		d.Memtable.Put(key, value)
 	}
 }
@@ -240,13 +287,15 @@ func (d *DiskStore) Get(key string) string {
 	if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
 		// check auxillary memtable
 
-		value, err = d.AuxillaryMemtable.Get(key)
+		if d.AuxillaryMemtable != nil {
+			value, err = d.AuxillaryMemtable.Get(key)
+		}
 
 		if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
 			// check all the segments one by one from the most recent
 
 			d.Manifest.Mu.Lock()
-			value, err = d.CheckAllSegmentsOneByOne(key, int(len(d.Manifest.ManifestData.Segments)-1))
+			value, err = d.ReadLevelByLevel(key)
 			d.Manifest.Mu.Unlock()
 
 			if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
@@ -259,22 +308,25 @@ func (d *DiskStore) Get(key string) string {
 	return value
 }
 
-// Returns the most recent segment id plus 1 from the disk store
-func (d *DiskStore) GetNewSegmentId() uint32 {
-	d.Manifest.Mu.Lock()
-	defer func() {
-		d.Manifest.Mu.Unlock()
-	}()
-	if len(d.Manifest.ManifestData.Segments) == 0 {
-		return 1
+// Reads the Segment files level by level starting from L0 to LN (where N is a variable)
+func (d *DiskStore) ReadLevelByLevel(key string) (string, error) {
+	for i := uint32(0); i < uint32(d.Manifest.NumberOfLevels); i++ {
+		numberOfSegmentsInCurrentLevel := len(d.Manifest.SegmentLevels[i].Segments)
+		val, err := d.CheckALevelForAKey(key, i, numberOfSegmentsInCurrentLevel-1)
+		if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
+			continue
+		}
+		return val, nil
 	}
-	return d.Manifest.ManifestData.Segments[len(d.Manifest.ManifestData.Segments)-1].SegmentId + 1
+	return "", CustomError.KeyDoesNotExistError
 }
 
-func (d *DiskStore) CheckAllSegmentsOneByOne(key string, segmentIndex int) (string, error) {
+// checks the segments of a level from most recent to least recent
+func (d *DiskStore) CheckALevelForAKey(key string, level uint32, segmentIndex int) (string, error) {
 
 	var l = utils.Logger.WithFields(logrus.Fields{
-		"method":              "CheckAllSegmentsOneByOne",
+		"method":              "CheckALevelForAKey",
+		"param_level":         level,
 		"param_key":           key,
 		"param_segmentNumber": segmentIndex,
 	})
@@ -283,16 +335,26 @@ func (d *DiskStore) CheckAllSegmentsOneByOne(key string, segmentIndex int) (stri
 	}
 	l.Infof("Attempting to check segment file %d for key %s", segmentIndex, key)
 
-	memtable := memtable.GetNewMemTable(d.Manifest.ManifestData.DbName)
-	memtable.LoadFromSegmentFile(d.Manifest.ManifestData.Segments[segmentIndex].SegmentId)
+	memtable := memtable.GetNewMemTable(d.Manifest.DbName, -1) // passing -1 cuz segmentId will be updated in the next line
+	memtable.LoadFromSegmentFile(d.Manifest.SegmentLevels[level].Segments[segmentIndex].SegmentId)
 
 	value, err := memtable.Get(key)
 	if err != nil && errors.Is(err, CustomError.KeyDoesNotExistError) {
 		// check before segment file recursively
-		return d.CheckAllSegmentsOneByOne(key, segmentIndex-1)
+		return d.CheckALevelForAKey(key, level, segmentIndex-1)
 	}
 
 	return value, nil
+}
+
+// Returns the most recent segment id plus 1 from the disk store
+func (d *DiskStore) GetNewSegmentId() uint32 {
+	d.Manifest.Mu.Lock()
+	defer func() {
+		d.Manifest.Mu.Unlock()
+	}()
+	d.Manifest.MaxSegmentId += 1
+	return d.Manifest.MaxSegmentId
 }
 
 // clears the db
@@ -304,13 +366,14 @@ func (d *DiskStore) Cleanup() {
 
 	// clear the segments slice
 	d.Manifest.Mu.Lock()
-	d.Manifest.ManifestData.Segments = d.Manifest.ManifestData.Segments[:0]
+	d.Manifest.NumberOfLevels = 0
+	d.Manifest.SegmentLevels = []SegmentLevelMetadata{}
 	d.Manifest.Mu.Unlock()
 
 	// delete everything including manifest file
 
 	path := config.Config.Path
-	dirPath := fmt.Sprintf("%s/%s", path, d.Manifest.ManifestData.DbName)
+	dirPath := fmt.Sprintf("%s/%s", path, d.Manifest.DbName)
 	err := os.RemoveAll(dirPath)
 	if err != nil {
 		l.Errorln(err)
@@ -327,12 +390,12 @@ func (d *DiskStore) ChangeNumberOfSegmentsInManifest() {
 		l.Panicf("Error in truncating manifest file %v", err)
 	}
 
-	marshalledManifestData, err := json.Marshal(d.Manifest.ManifestData)
+	marshalledManifestData, err := json.Marshal(d.Manifest)
 	if err != nil {
 		l.Panicf("Error in marshalling  manifest obejct %v", err)
 	}
 
-	manifestFile := fmt.Sprintf("%s/%s/manifest.json", config.Config.Path, d.Manifest.ManifestData.DbName)
+	manifestFile := fmt.Sprintf("%s/%s/manifest.json", config.Config.Path, d.Manifest.DbName)
 	// err = encoder.Encode(manifest)
 	err = ioutil.WriteFile(manifestFile, marshalledManifestData, 0666)
 
@@ -348,16 +411,36 @@ func (d *DiskStore) CloseDB() {
 	})
 	l.Infoln("Closing the database")
 
+	// wait for any memtable disk writes to finish
+	if d.AuxillaryMemtable != nil {
+		l.Debugln("Waiting for aux memtable write to disk to finish")
+		d.AuxillaryMemtable.Wg.Wait()
+	}
+	d.MergeCompactorWg.Wait()
+
 	// write memtable to segment file and clear it
-	segmentId := d.GetNewSegmentId()
-	cardinality, err := d.Memtable.WriteMemtableToDisk(segmentId)
+
+	// TODO: write memtable to level 0 file
+	if d.Manifest.NumberOfLevels > 0 {
+		d.AddSegmentToLevelAndPerformCompaction(1)
+	} else {
+		d.Manifest.NumberOfLevels = 1
+		d.Manifest.SegmentLevels = append(d.Manifest.SegmentLevels, SegmentLevelMetadata{
+			Segments: []SegmentMetadata{},
+			Mu:       &sync.Mutex{},
+		})
+		d.InitMergeCompactor(0)
+	}
+
+	cardinality, err := d.Memtable.WriteMemtableToDisk()
 	if err != nil {
 		l.Fatalf("Error while writing memtable to disk %v", err)
 	}
 	d.Manifest.Mu.Lock()
-	d.Manifest.ManifestData.Segments = append(d.Manifest.ManifestData.Segments, SegmentMetadata{
-		SegmentId:   segmentId,
+	d.Manifest.SegmentLevels[0].Segments = append(d.Manifest.SegmentLevels[0].Segments, SegmentMetadata{
+		SegmentId:   uint32(d.Memtable.SegmentId),
 		Cardinality: cardinality,
+		Mu:          &sync.Mutex{},
 	})
 	d.Manifest.Mu.Unlock()
 	d.ChangeNumberOfSegmentsInManifest()

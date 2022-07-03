@@ -54,14 +54,43 @@ Mostly contains stuff where I debate with myself on which design / lib / ... is 
 - While performing merge compaction of N segments, where N is configurable, following things are to be considered
     - Their merged segment size should'nt cross certain size limit
     - ~~Timestamp of newest merged segment = max (timestamps of all segments considered for merging)~~
-    - Timestamps doesn't work as the difference to fill another 4kb memtable is very very small. Going with just incremental segmentId for this
+    - Timestamps doesn't work as the difference to fill another 4kb memtable is very very small. Going with just incremental SegmentId for this
     - For a new segment, segment id would be max(all segment id's) + 1
     - For a merged segment, segment id = max(all merged segments)
     - Cardinality is simple
 - When to perform merge compaction on the background? when total number of segments become more than N
 - Segments should be named according to segment id
 - Is it better to hold the *os.File of db manifest file as long as program is running? Reason being we have to read and write from segment file so many times and opening and closing it everytime might be in-effficient 
-- Referring [BigTable]
+- Referring [4]
+
+#### Read Amplification
+Read amplification indicates the number of disk reads a read request causes.
+
+#### Write Amplification
+Write amplification is an undesirable phenomenon associated with flash memory and solid-state drives where the actual amount of information physically written to the storage media is a multiple of the logical amount intended to be written.
+
+#### Space Amplification
+Space amplification equals the size of space occupied divided by the actual size of data.
+
+### Final Merge-Compaction Strategy
+- Doing levelled compaction strategy used in famous key value stores like CassandraDB inspired from Google's BigTable and LevelDB.
+- Idea is to have fixed sized SSTables segregated in different levels(like L0,L1 etc). Size of sstable file = 4KB (OS page size).
+- L0 has the latest data , as level increases data's age increases
+- __Property:__ Each Level (L+1) is T times larger than level L. For ex if T = 10 (used generally), then L1 is 10 times as larger as L0.
+- L0 has the most recently added data. Now when L0 reaches a certain file limit (let's say 1 if we take f(L) = 10^L), then an oldest sstable from that level is merged to all of the files of level L+1. Here in L0, basically everytime it is merged with level L+1. When L+1 reaches the file limit, then the oldest file from L+1 is merged with L+2 and so on.
+
+#### Merging a sstable with a level
+- When a sstable is to be merged with a level L, assuming all the files in level L are non-overlapping. Only select the files which has overlaps with current sstable and then modify all of them together to write the new set of files in that level. Files which dont overlap are put just as it is. Newly modified files come with a bigger SegmentId so that they will be searched first.
+
+#### Implementation
+- Have a channel called "merge" for each level. Level L will pass a message to merge channel of L+1 when it reaches its size limit
+- Using dynamic select [Link](https://stackoverflow.com/questions/19992334/how-to-listen-to-n-channels-dynamic-select-statement), we can listen to all the channels and then trigger merge compaction 
+- A go-routine will have this select statement and will be running in the background
+- For compaction process, another child go-routine will be created.
+  
+
+
+
 
 
 ### Caching
@@ -88,3 +117,6 @@ Mostly contains stuff where I debate with myself on which design / lib / ... is 
 - [4] [Merge Compaction in BigTable](https://arxiv.org/pdf/1407.3008.pdf)
 - [5] [An In-depth Discussion on the LSM Compaction Mechanism](https://www.alibabacloud.com/blog/an-in-depth-discussion-on-the-lsm-compaction-mechanism_596780)
 - [6] [Facebook's RocksDB](https://github.com/facebook/rocksdb/wiki/RocksDB-Overview)
+- [7] [Constructing and Analyzing the LSM Compaction Design Space](http://vldb.org/pvldb/vol14/p2216-sarkar.pdf)
+- [8] [Revisiting B+-tree vs. LSM-tree](https://www.usenix.org/publications/loginonline/revisit-b-tree-vs-lsm-tree-upon-arrival-modern-storage-hardware-built)
+- [9] [Leveled Compaction in Apache Cassandra](https://www.datastax.com/blog/leveled-compaction-apache-cassandra)

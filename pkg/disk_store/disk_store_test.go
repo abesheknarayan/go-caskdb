@@ -50,6 +50,8 @@ func Test_MultipleSegments(t *testing.T) {
 
 	numChecks := rand.Intn(N-1) + 1
 
+	fmt.Println(db.Manifest)
+
 	for i := 0; i < numChecks; i++ {
 		nKey := allKeys[rand.Intn(N)]
 		assert.Equal(t, m[nKey], db.Get(nKey), "Values are not equal!!")
