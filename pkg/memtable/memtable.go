@@ -2,6 +2,7 @@ package memtable
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -56,7 +57,7 @@ func (mt *MemTable) Get(key string) (string, error) {
 	kv, exist := mt.Memtable[key]
 
 	if !exist {
-		return "", CustomError.KeyDoesNotExistError
+		return "", CustomError.ErrKeyDoesNotExist
 	}
 
 	return kv.Value, nil
@@ -64,14 +65,20 @@ func (mt *MemTable) Get(key string) (string, error) {
 
 func (mt *MemTable) Put(key string, value string) error {
 
+	_, alreadyExists := mt.Memtable[key]
+
 	mt.Memtable[key] = KeyEntry.KeyEntry{
 		Timestamp: time.Now().Unix(),
 		Value:     value,
 	}
 
+	if alreadyExists {
+		return nil
+	}
+
 	if mt.BytesOccupied+uint64(len(key)+len(value)) > MAXSIZE {
 		// copy all the memtable to segment file --> disk write
-		return CustomError.MaxSizeExceedError
+		return CustomError.ErrMaxSizeExceeded
 	}
 
 	mt.BytesOccupied += uint64((len(key) + len(value) + 8)) // 8 for timestamp
@@ -134,8 +141,8 @@ func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
 	return nil
 }
 
-// returns the (written segment file name, timestamp, cardinality of segment) along with error
-func (mt *MemTable) WriteMemtableToDisk() (uint32, error) {
+// returns the (written segment file name, whether it already existed, cardinality of segment) along with error
+func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
@@ -148,11 +155,18 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, error) {
 
 	segmentFilePath := fmt.Sprintf("%s/%s/%s", path, mt.DbName, segmentFileName)
 
+	var exists bool = true
+
+	if _, err := os.Stat(segmentFilePath); errors.Is(err, os.ErrNotExist) {
+		// file doesnt exist
+		exists = false
+	}
+
 	f, err := os.OpenFile(segmentFilePath, os.O_RDWR|os.O_CREATE, 0666)
 
 	if err != nil {
 		l.Errorf("Error in opening segment file %s : %v", segmentFilePath, err)
-		return 0, nil
+		return 0, false, CustomError.ErrOpeningSegmentFile
 	}
 
 	// truncate the file
@@ -184,7 +198,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, error) {
 
 	l.Debugf("Successfully written memtable to segfile %s with cardinality: %d", segmentFileName, uint32(len(sortedKeys)))
 
-	return uint32(len(sortedKeys)), nil
+	return uint32(len(sortedKeys)), exists, nil
 }
 
 // Clears the memtable

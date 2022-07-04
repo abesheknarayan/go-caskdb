@@ -4,6 +4,7 @@ import (
 	"math"
 	"sync"
 
+	CustomError "github.com/abesheknarayan/go-caskdb/pkg/error"
 	"github.com/abesheknarayan/go-caskdb/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -41,7 +42,6 @@ func (d *DiskStore) WatchLevelForSizeLimitExceed(level uint32) {
 		if err != nil {
 			l.Errorln(err)
 		}
-		// d.MergeCompactor[level].SignalChan <- true
 	}
 }
 
@@ -53,10 +53,7 @@ func (d *DiskStore) AddSegmentToLevelAndPerformCompaction(nextLevel uint32) erro
 	l.Infof("Attempting to perform merge compaction from level %d to level %d", nextLevel-1, nextLevel)
 
 	d.MergeCompactorWg.Add(1)
-	l.Debugln("Came here 4")
 
-	d.Manifest.Mu.Lock()
-	l.Debugln("Came here 3")
 	defer func() {
 		l.Infoln("Finished merging onto level", nextLevel, "from level ", nextLevel-1)
 		d.MergeCompactorWg.Done()
@@ -65,6 +62,7 @@ func (d *DiskStore) AddSegmentToLevelAndPerformCompaction(nextLevel uint32) erro
 	// TODO
 
 	// check if next level exists
+	l.Debugln(len(d.MergeCompactor), nextLevel, d.MergeCompactor)
 	if len(d.MergeCompactor) <= int(nextLevel) {
 		// initiate next level
 		d.Manifest.NumberOfLevels += 1
@@ -95,13 +93,15 @@ func (d *DiskStore) AddSegmentToLevelAndPerformCompaction(nextLevel uint32) erro
 	if sz > 0 {
 		// pop the first segment
 		leastRecentSegmentOnCurrentLevel = d.Manifest.SegmentLevels[currentLevel].Segments[0]
-		d.Manifest.SegmentLevels[nextLevel-1].Segments = d.Manifest.SegmentLevels[currentLevel].Segments[1:]
+		d.Manifest.SegmentLevels[currentLevel].Segments = d.Manifest.SegmentLevels[currentLevel].Segments[1:]
+	} else {
+		return CustomError.ErrSegmentLevelEmpty
 	}
 	// l.Debugln(sz, leastRecentSegmentOnCurrentLevel)
 
 	// TODO: for now just adding, later apply proper merge compaction strategy here
 	d.Manifest.SegmentLevels[nextLevel].Segments = append(d.Manifest.SegmentLevels[nextLevel].Segments, leastRecentSegmentOnCurrentLevel)
-	d.Manifest.Mu.Unlock()
+	l.Debugln("here", leastRecentSegmentOnCurrentLevel, d.Manifest)
 
 	// trigger everytime an insertion at next level happens
 	go d.WatchLevelForSizeLimitExceed(nextLevel)

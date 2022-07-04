@@ -19,7 +19,7 @@ func main() {
 		log.Fatalf("Failed to initialize DB %v", err)
 	}
 
-	for i := 0; i < 2500; i++ {
+	for i := 100; i < 200; i++ {
 
 		// key := utils.GetRandomString(rand.Int()%10 + 1)
 		// value := utils.GetRandomString(rand.Int()%10 + 1)
@@ -37,5 +37,5 @@ func main() {
 	utils.Logger.Debugln(booksDb.Get("Key 930"))
 
 	booksDb.CloseDB()
-	booksDb.Cleanup()
+	// booksDb.Cleanup()
 }
