@@ -10,7 +10,7 @@ Go-CaskDB is a disk-based, embedded, persistent, key-value store based on the [R
 - [x] Testing (Unit + Integration)
 - [x] Proper logging
 - [x] Split db file into several small files 
-- [ ] Implement merging compaction using go-routines
+- [x] Implement merging compaction strategy 
 - [ ] Key Deletion with Tombstone file
 - [ ] Crash Safety with WAL
 - [ ] Benchmarking
