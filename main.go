@@ -19,12 +19,12 @@ func main() {
 		log.Fatalf("Failed to initialize DB %v", err)
 	}
 
-	for i := 100; i < 200; i++ {
+	for i := 0; i < 1000; i++ {
 
 		// key := utils.GetRandomString(rand.Int()%10 + 1)
 		// value := utils.GetRandomString(rand.Int()%10 + 1)
-		key := fmt.Sprintf("Key %d", i+1)
-		value := fmt.Sprintf("Value %d", i+1)
+		key := fmt.Sprintf("Key %d", (i+1)%300)
+		value := fmt.Sprintf("Value %d", (i+1)%300)
 		// fmt.Println(key, value)
 		booksDb.Put(key, value)
 	}

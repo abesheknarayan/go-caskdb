@@ -86,6 +86,7 @@ Space amplification equals the size of space occupied divided by the actual size
 - Have a channel called "merge" for each level. Level L will pass a message to merge channel of L+1 when it reaches its size limit
 - Using dynamic select [Link](https://stackoverflow.com/questions/19992334/how-to-listen-to-n-channels-dynamic-select-statement), we can listen to all the channels and then trigger merge compaction 
 - A go-routine will have this select statement and will be running in the background
+- Above mentioned channel method is an overkill, instead of that we just manually trigger checking condition for every insert as it is very less in cost
 - For compaction process, another child go-routine will be created.
   
 

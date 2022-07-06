@@ -65,26 +65,52 @@ func (mt *MemTable) Get(key string) (string, error) {
 
 func (mt *MemTable) Put(key string, value string) error {
 
-	_, alreadyExists := mt.Memtable[key]
+	oldKeyEntry, alreadyExists := mt.Memtable[key]
+
+	oldBytes := 0
+
+	if alreadyExists {
+		oldBytes = len(key) + len(oldKeyEntry.Value) + 8
+	}
+	newBytes := len(key) + len(value) + 8
+
+	if mt.BytesOccupied+uint64(newBytes-oldBytes) > MAXSIZE {
+		// copy all the memtable to segment file --> disk write
+		return CustomError.ErrMaxSizeExceeded
+	}
 
 	mt.Memtable[key] = KeyEntry.KeyEntry{
 		Timestamp: time.Now().Unix(),
 		Value:     value,
 	}
-
-	if alreadyExists {
-		return nil
-	}
-
-	if mt.BytesOccupied+uint64(len(key)+len(value)) > MAXSIZE {
-		// copy all the memtable to segment file --> disk write
-		return CustomError.ErrMaxSizeExceeded
-	}
-
-	mt.BytesOccupied += uint64((len(key) + len(value) + 8)) // 8 for timestamp
+	mt.BytesOccupied += uint64(newBytes - oldBytes) // 8 for timestamp
 
 	return nil
 }
+
+// // special function where timestamps are also provided (mainly used in merge-compaction)
+// // No support for function overloading in Golang :( thus a diff name
+// func (mt *MemTable) PutWithTimestamp(key string, value string, timestamp int64) error {
+// 	_, alreadyExists := mt.Memtable[key]
+
+// 	mt.Memtable[key] = KeyEntry.KeyEntry{
+// 		Timestamp: timestamp,
+// 		Value:     value,
+// 	}
+
+// 	if alreadyExists {
+// 		return nil
+// 	}
+
+// 	if mt.BytesOccupied+uint64(len(key)+len(value)) > MAXSIZE {
+// 		// copy all the memtable to segment file --> disk write
+// 		return CustomError.ErrMaxSizeExceeded
+// 	}
+
+// 	mt.BytesOccupied += uint64((len(key) + len(value) + 8)) // 8 for timestamp
+
+// 	return nil
+// }
 
 func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
 
@@ -148,6 +174,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 		"method": "WriteMemtableToDisk",
 	})
 	l.Info("Writing Memtable to Segment file !!")
+	l.Debugln(mt.Memtable)
 
 	path := config.Config.Path
 
@@ -199,6 +226,11 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 	l.Debugf("Successfully written memtable to segfile %s with cardinality: %d", segmentFileName, uint32(len(sortedKeys)))
 
 	return uint32(len(sortedKeys)), exists, nil
+}
+
+func (mt *MemTable) Contains(key string) bool {
+	_, ok := mt.Memtable[key]
+	return ok
 }
 
 // Clears the memtable

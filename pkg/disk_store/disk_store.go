@@ -92,7 +92,6 @@ func InitDb(dbName string) (*DiskStore, error) {
 	}
 
 	manifest := LoadManifest(f)
-	l.Debugln(manifest)
 
 	d := &DiskStore{
 		Manifest:          manifest,
@@ -115,11 +114,6 @@ func InitDb(dbName string) (*DiskStore, error) {
 		}
 	}
 
-	// load the most recent segment file onto memtable
-	l.Debugln(d.Manifest)
-	l.Debugln(d.Manifest.SegmentLevels[0], len(d.Manifest.SegmentLevels[0].Segments))
-
-	// TODO
 	// load the level 0 segment file if it exists
 	if d.Manifest.NumberOfLevels > 0 {
 		d.Memtable.LoadFromSegmentFile(d.Manifest.SegmentLevels[0].Segments[len(d.Manifest.SegmentLevels[0].Segments)-1].SegmentId)
@@ -221,21 +215,19 @@ func (d *DiskStore) Put(key string, value string) {
 		// if its not nil then before auxillary memtable is waiting to write its contents to file and got blocked because of file write. So we block the main go routine so that, the auxillary file write finishes before executing further
 		// Important point to note here is that, during the time between auxillary go routine waiting to write to this step in the next run, all writes and reads are supported using memtable and aux memtable so no issues with reads and writes
 		if d.AuxillaryMemtable != nil {
-			l.Debugln("Waiting for aux memtable write to disk to finish")
+			l.Infoln("Waiting for aux memtable write to disk to finish")
 			// d.AuxillaryMemtable.Mu.Lock()
 			d.AuxillaryMemtable.Wg.Wait()
 			// d.AuxillaryMemtable.Mu.Unlock()
 
 		}
-		l.Debugln("Writing memtable to aux")
+		l.Infoln("Writing memtable to aux")
 		d.AuxillaryMemtable = d.Memtable
 		d.Memtable = memtable.GetNewMemTable(d.Manifest.DbName, int32(d.GetNewSegmentId()))
-		l.Debugln("Printing memtable id", d.Memtable.SegmentId)
 
 		go func() {
 			// find segment id
-			l.Debugln("Writing Auxillary memtable to disk")
-			l.Debugln(d.AuxillaryMemtable)
+			l.Infoln("Writing Auxillary memtable to disk")
 			d.AuxillaryMemtable.Wg.Add(1)
 
 			// TODO trigger compaction for level 0 to 1 specially here
@@ -256,8 +248,6 @@ func (d *DiskStore) Put(key string, value string) {
 				l.Fatalln(err)
 			}
 			d.Manifest.Mu.Lock()
-
-			l.Debugln(d.Manifest.SegmentLevels[0], exists)
 
 			// append only if its newly added file
 			if !exists {
@@ -417,6 +407,11 @@ func (d *DiskStore) ChangeNumberOfSegmentsInManifest() {
 		l.Panicf("Error in truncating manifest file %v", err)
 	}
 
+	d.Manifest.Mu.Lock()
+	defer func() {
+		d.Manifest.Mu.Unlock()
+	}()
+
 	marshalledManifestData, err := json.Marshal(d.Manifest)
 	if err != nil {
 		l.Panicf("Error in marshalling  manifest obejct %v", err)
@@ -429,6 +424,7 @@ func (d *DiskStore) ChangeNumberOfSegmentsInManifest() {
 	if err != nil {
 		l.Panicf("Error in writing to manifest file %v", err)
 	}
+
 }
 
 // Deletes the contents of memtable
@@ -440,7 +436,7 @@ func (d *DiskStore) CloseDB() {
 
 	// wait for any memtable disk writes to finish
 	if d.AuxillaryMemtable != nil {
-		l.Debugln("Waiting for aux memtable write to disk to finish")
+		l.Infoln("Waiting for aux memtable write to disk to finish")
 		d.AuxillaryMemtable.Wg.Wait()
 	}
 	d.MergeCompactorWg.Wait()
@@ -466,9 +462,7 @@ func (d *DiskStore) CloseDB() {
 	if err != nil {
 		l.Fatalf("Error while writing memtable to disk %v", err)
 	}
-	l.Debugln(cardinality, exists, err)
 	d.Manifest.Mu.Lock()
-	l.Debugln("came here")
 	// append only if its newly added file
 	if !exists {
 		d.Manifest.SegmentLevels[0].Segments = append(d.Manifest.SegmentLevels[0].Segments, SegmentMetadata{
@@ -476,7 +470,6 @@ func (d *DiskStore) CloseDB() {
 			Cardinality: cardinality,
 			Mu:          &sync.Mutex{},
 		})
-		l.Debugln(d.Manifest)
 
 		// unlock specifically here because next function locks it
 		d.Manifest.Mu.Unlock()

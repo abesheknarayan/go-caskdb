@@ -1,10 +1,14 @@
 package disk_store
 
 import (
+	"fmt"
 	"math"
+	"sort"
 	"sync"
 
+	"github.com/abesheknarayan/go-caskdb/pkg/config"
 	CustomError "github.com/abesheknarayan/go-caskdb/pkg/error"
+	"github.com/abesheknarayan/go-caskdb/pkg/memtable"
 	"github.com/abesheknarayan/go-caskdb/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -27,9 +31,6 @@ func (d *DiskStore) WatchLevelForSizeLimitExceed(level uint32) {
 		"method": "WatchLevelForSizeLimitExceed",
 	})
 
-	// l.Debugln("Listening in level", level)
-
-	// TODO
 	// check for size exceeded case
 	d.Manifest.Mu.Lock()
 	sizeOfCurrentLevel := len(d.Manifest.SegmentLevels[level].Segments)
@@ -62,7 +63,6 @@ func (d *DiskStore) AddSegmentToLevelAndPerformCompaction(nextLevel uint32) erro
 	// TODO
 
 	// check if next level exists
-	l.Debugln(len(d.MergeCompactor), nextLevel, d.MergeCompactor)
 	if len(d.MergeCompactor) <= int(nextLevel) {
 		// initiate next level
 		d.Manifest.NumberOfLevels += 1
@@ -87,8 +87,6 @@ func (d *DiskStore) AddSegmentToLevelAndPerformCompaction(nextLevel uint32) erro
 		d.Manifest.SegmentLevels[currentLevel].Mu.Unlock()
 	}()
 	sz := len(d.Manifest.SegmentLevels[currentLevel].Segments)
-	// l.Debugln(d.Manifest.SegmentLevels)
-	// l.Debugln(nextLevel, currentLevel)
 	var leastRecentSegmentOnCurrentLevel SegmentMetadata
 	if sz > 0 {
 		// pop the first segment
@@ -97,14 +95,152 @@ func (d *DiskStore) AddSegmentToLevelAndPerformCompaction(nextLevel uint32) erro
 	} else {
 		return CustomError.ErrSegmentLevelEmpty
 	}
-	// l.Debugln(sz, leastRecentSegmentOnCurrentLevel)
 
-	// TODO: for now just adding, later apply proper merge compaction strategy here
-	d.Manifest.SegmentLevels[nextLevel].Segments = append(d.Manifest.SegmentLevels[nextLevel].Segments, leastRecentSegmentOnCurrentLevel)
-	l.Debugln("here", leastRecentSegmentOnCurrentLevel, d.Manifest)
+	/*
+	  - merging all segments from smaller to bigger
+	*/
+	err := d.MergeCompact(leastRecentSegmentOnCurrentLevel, nextLevel)
+
+	if err != nil {
+		l.Errorln(err)
+	}
 
 	// trigger everytime an insertion at next level happens
 	go d.WatchLevelForSizeLimitExceed(nextLevel)
+
+	return nil
+}
+
+// performs merge compaction of segment onto level `level`
+func (d *DiskStore) MergeCompact(mergingSegment SegmentMetadata, level uint32) error {
+	var l = utils.Logger.WithFields(logrus.Fields{
+		"method": "MergeCompact",
+	})
+	l.Infof("Attempting to merge segment %d.seg to level %d", mergingSegment.SegmentId, level)
+
+	var allSegments []SegmentMetadata
+	allSegments = append(allSegments, mergingSegment)
+	allSegments = append(allSegments, d.Manifest.SegmentLevels[level].Segments...)
+
+	// sort `allSegments` to lowest cardinality first order
+	sort.Slice(allSegments, func(i, j int) bool {
+		return allSegments[i].Cardinality < allSegments[j].Cardinality
+	})
+
+	// one big memtable :o
+	mergedMemtable := memtable.MemTable{
+		DbName:        d.Manifest.DbName,
+		BytesOccupied: 0,
+		Memtable:      memtable.HashMap{},
+		Mu:            &sync.Mutex{},
+		Wg:            &sync.WaitGroup{},
+	}
+
+	for _, segment := range allSegments {
+		tempMemtable := memtable.MemTable{
+			DbName:        d.Manifest.DbName,
+			BytesOccupied: 0,
+			Memtable:      memtable.HashMap{},
+			Mu:            &sync.Mutex{},
+			Wg:            &sync.WaitGroup{},
+		}
+		err := tempMemtable.LoadFromSegmentFile(segment.SegmentId)
+		if err != nil {
+			return fmt.Errorf("error while performing merge compaction of segment %d onto level %d", segment.SegmentId, level)
+		}
+		for key, keyEntry := range tempMemtable.Memtable {
+			if mergedMemtable.Contains(key) {
+				// insert only if key_entry from merged memtable is older
+				mergedKeyEntry := mergedMemtable.Memtable[key]
+				if mergedKeyEntry.Timestamp < keyEntry.Timestamp {
+					// change value and timestamp in mergedMemtable
+
+					// note not using `Put` method here to prevent the size exceeded error
+					mergedMemtable.Memtable[key] = keyEntry
+				}
+			} else {
+				mergedMemtable.Memtable[key] = keyEntry
+			}
+		}
+	}
+
+	// split everything into multiple files
+	// make sure of giving proper segment ids
+	// number of merged segemnts <= already present segments
+	var segmentIds []uint32
+
+	for _, segment := range d.Manifest.SegmentLevels[level].Segments {
+		segmentIds = append(segmentIds, segment.SegmentId)
+	}
+	segmentIds = append(segmentIds, mergingSegment.SegmentId)
+
+	segmendIndex := len(segmentIds) - 1
+
+	// using temporary Memtable
+	tempMemtable := memtable.MemTable{
+		DbName:        d.Manifest.DbName,
+		SegmentId:     int32(segmentIds[segmendIndex]),
+		BytesOccupied: 0,
+		Memtable:      memtable.HashMap{},
+		Mu:            &sync.Mutex{},
+		Wg:            &sync.WaitGroup{},
+	}
+
+	// delete all segments already present
+
+	for _, id := range segmentIds {
+		err := utils.DeleteFile(fmt.Sprintf("%s/%s/%d.seg", config.Config.Path, d.Manifest.DbName, id))
+		if err != nil {
+			return fmt.Errorf("error while deleting file %d.seg: %v", id, err)
+		}
+	}
+
+	// clear manifest level
+	d.Manifest.SegmentLevels[level].Segments = d.Manifest.SegmentLevels[level].Segments[:0]
+
+	for key, keyEntry := range mergedMemtable.Memtable {
+		err := tempMemtable.Put(key, keyEntry.Value)
+		if err == CustomError.ErrMaxSizeExceeded {
+			cardinality, _, err := tempMemtable.WriteMemtableToDisk()
+			if err != nil {
+				return fmt.Errorf("error while writing temporary memtable to disk")
+			}
+			l.Infof("Successfully written the temporary memtable to disk with cardinality: %d", cardinality)
+
+			// add into manifest level
+			d.Manifest.SegmentLevels[level].Segments = append(d.Manifest.SegmentLevels[level].Segments, SegmentMetadata{
+				SegmentId:   uint32(tempMemtable.SegmentId),
+				Cardinality: cardinality,
+				Mu:          &sync.Mutex{},
+			})
+
+			// update memtable for next step
+			tempMemtable.Clear()
+			segmendIndex--
+			tempMemtable.SegmentId = int32(segmentIds[segmendIndex])
+
+			// put again, this time there wont be any error
+			tempMemtable.Put(key, keyEntry.Value)
+		}
+	}
+
+	// write leftover temp memtable elements onto disk
+	if tempMemtable.BytesOccupied > 0 {
+		cardinality, _, err := tempMemtable.WriteMemtableToDisk()
+		if err != nil {
+			return fmt.Errorf("error while writing temporary memtable to disk")
+		}
+		l.Infof("Successfully written the temporary memtable to disk with cardinality: %d\n", cardinality)
+
+		// add into manifest level
+		d.Manifest.SegmentLevels[level].Segments = append(d.Manifest.SegmentLevels[level].Segments, SegmentMetadata{
+			SegmentId:   uint32(tempMemtable.SegmentId),
+			Cardinality: cardinality,
+			Mu:          &sync.Mutex{},
+		})
+	}
+
+	l.Infof("Merge Compaction of level %d is complete!!\n", level)
 
 	return nil
 }
