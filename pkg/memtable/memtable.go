@@ -2,6 +2,7 @@ package memtable
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -33,16 +34,20 @@ type MemTable struct {
 	DbName        string
 	BytesOccupied uint64 // total nunber of bytes occupied
 	Memtable      HashMap
+	SegmentId     int32
+	Mu            *sync.Mutex
 	Wg            *sync.WaitGroup
 }
 
-func GetNewMemTable(dbName string) *MemTable {
+func GetNewMemTable(dbName string, SegmentId int32) *MemTable {
 
 	memtable := &MemTable{
 		DbName:        dbName,
 		BytesOccupied: 0,
 		Memtable:      make(HashMap),
+		Mu:            &sync.Mutex{},
 		Wg:            &sync.WaitGroup{},
+		SegmentId:     int32(SegmentId),
 	}
 
 	return memtable
@@ -52,7 +57,7 @@ func (mt *MemTable) Get(key string) (string, error) {
 	kv, exist := mt.Memtable[key]
 
 	if !exist {
-		return "", CustomError.KeyDoesNotExistError
+		return "", CustomError.ErrKeyDoesNotExist
 	}
 
 	return kv.Value, nil
@@ -60,31 +65,63 @@ func (mt *MemTable) Get(key string) (string, error) {
 
 func (mt *MemTable) Put(key string, value string) error {
 
+	oldKeyEntry, alreadyExists := mt.Memtable[key]
+
+	oldBytes := 0
+
+	if alreadyExists {
+		oldBytes = len(key) + len(oldKeyEntry.Value) + 8
+	}
+	newBytes := len(key) + len(value) + 8
+
+	if mt.BytesOccupied+uint64(newBytes-oldBytes) > MAXSIZE {
+		// copy all the memtable to segment file --> disk write
+		return CustomError.ErrMaxSizeExceeded
+	}
+
 	mt.Memtable[key] = KeyEntry.KeyEntry{
 		Timestamp: time.Now().Unix(),
 		Value:     value,
 	}
-
-	if mt.BytesOccupied+uint64(len(key)+len(value)) > MAXSIZE {
-		// copy all the memtable to segment file --> disk write
-		return CustomError.MaxSizeExceedError
-	}
-
-	mt.BytesOccupied += uint64((len(key) + len(value) + 8)) // 8 for timestamp
+	mt.BytesOccupied += uint64(newBytes - oldBytes) // 8 for timestamp
 
 	return nil
 }
 
-func (mt *MemTable) LoadFromSegmentFile(segmentId uint32) error {
+// // special function where timestamps are also provided (mainly used in merge-compaction)
+// // No support for function overloading in Golang :( thus a diff name
+// func (mt *MemTable) PutWithTimestamp(key string, value string, timestamp int64) error {
+// 	_, alreadyExists := mt.Memtable[key]
+
+// 	mt.Memtable[key] = KeyEntry.KeyEntry{
+// 		Timestamp: timestamp,
+// 		Value:     value,
+// 	}
+
+// 	if alreadyExists {
+// 		return nil
+// 	}
+
+// 	if mt.BytesOccupied+uint64(len(key)+len(value)) > MAXSIZE {
+// 		// copy all the memtable to segment file --> disk write
+// 		return CustomError.ErrMaxSizeExceeded
+// 	}
+
+// 	mt.BytesOccupied += uint64((len(key) + len(value) + 8)) // 8 for timestamp
+
+// 	return nil
+// }
+
+func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
 
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "LoadFromSegmentFile",
 	})
-	l.Infof("Attempting to load segment file with id %d of db %s", segmentId, mt.DbName)
+	l.Infof("Attempting to load segment file with id %d of db %s", SegmentId, mt.DbName)
 
 	path := config.Config.Path
 
-	segmentFilePath := fmt.Sprintf("%s/%s/%d.seg", path, mt.DbName, segmentId)
+	segmentFilePath := fmt.Sprintf("%s/%s/%d.seg", path, mt.DbName, SegmentId)
 
 	f, err := os.Open(segmentFilePath)
 
@@ -126,28 +163,37 @@ func (mt *MemTable) LoadFromSegmentFile(segmentId uint32) error {
 		}
 		mt.Memtable[key] = kv
 	}
+	mt.SegmentId = int32(SegmentId)
 	return nil
 }
 
-// returns the (written segment file name, timestamp, cardinality of segment) along with error
-func (mt *MemTable) WriteMemtableToDisk(segmentId uint32) (uint32, error) {
+// returns the (written segment file name, whether it already existed, cardinality of segment) along with error
+func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
 	})
 	l.Info("Writing Memtable to Segment file !!")
+	l.Debugln(mt.Memtable)
 
 	path := config.Config.Path
 
-	segmentFileName := fmt.Sprintf("%d.seg", segmentId)
+	segmentFileName := fmt.Sprintf("%d.seg", mt.SegmentId)
 
 	segmentFilePath := fmt.Sprintf("%s/%s/%s", path, mt.DbName, segmentFileName)
+
+	var exists bool = true
+
+	if _, err := os.Stat(segmentFilePath); errors.Is(err, os.ErrNotExist) {
+		// file doesnt exist
+		exists = false
+	}
 
 	f, err := os.OpenFile(segmentFilePath, os.O_RDWR|os.O_CREATE, 0666)
 
 	if err != nil {
 		l.Errorf("Error in opening segment file %s : %v", segmentFilePath, err)
-		return 0, nil
+		return 0, false, CustomError.ErrOpeningSegmentFile
 	}
 
 	// truncate the file
@@ -179,7 +225,12 @@ func (mt *MemTable) WriteMemtableToDisk(segmentId uint32) (uint32, error) {
 
 	l.Debugf("Successfully written memtable to segfile %s with cardinality: %d", segmentFileName, uint32(len(sortedKeys)))
 
-	return uint32(len(sortedKeys)), nil
+	return uint32(len(sortedKeys)), exists, nil
+}
+
+func (mt *MemTable) Contains(key string) bool {
+	_, ok := mt.Memtable[key]
+	return ok
 }
 
 // Clears the memtable

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"math/rand"
+	"os"
 	"time"
 )
 
@@ -20,4 +21,9 @@ func GenerateRandomStringWithCharset(length int, charset string) string {
 		b[i] = charset[seededRand.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+func DeleteFile(filePath string) error {
+	err := os.Remove(filePath)
+	return err
 }

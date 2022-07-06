@@ -50,6 +50,31 @@ func Test_MultipleSegments(t *testing.T) {
 
 	numChecks := rand.Intn(N-1) + 1
 
+	fmt.Println(db.Manifest)
+
+	for i := 0; i < numChecks; i++ {
+		nKey := allKeys[rand.Intn(N)]
+		assert.Equal(t, m[nKey], db.Get(nKey), "Values are not equal!!")
+	}
+}
+
+func Test_MergeCompaction(t *testing.T) {
+	N := 5000
+	m := make(map[string]string)
+	allKeys := make([]string, N)
+	for i := 0; i < N; i++ {
+		// maintaining a field of just 300 elements
+		key := fmt.Sprintf("Key: %d", (rand.Int()%300 + 1))
+		value := fmt.Sprintf("Value: %d", (rand.Int()%300 + 1))
+		allKeys = append(allKeys, key)
+		m[key] = value
+		db.Put(key, value)
+	}
+
+	numChecks := rand.Intn(N-1) + 1
+
+	fmt.Println(db.Manifest)
+
 	for i := 0; i < numChecks; i++ {
 		nKey := allKeys[rand.Intn(N)]
 		assert.Equal(t, m[nKey], db.Get(nKey), "Values are not equal!!")
