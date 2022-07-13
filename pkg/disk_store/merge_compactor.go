@@ -38,7 +38,9 @@ func (d *DiskStore) WatchLevelForSizeLimitExceed(level uint32) {
 		d.Manifest.Mu.Unlock()
 		return
 	}
+	d.Manifest.SegmentLevels[level].Mu.Lock()
 	sizeOfCurrentLevel := len(d.Manifest.SegmentLevels[level].Segments)
+	d.Manifest.SegmentLevels[level].Mu.Unlock()
 	d.Manifest.Mu.Unlock()
 
 	if sizeOfCurrentLevel > int(MaxSizeForLevel(level)) {

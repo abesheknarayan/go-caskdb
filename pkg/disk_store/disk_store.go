@@ -370,8 +370,14 @@ func (d *DiskStore) CheckALevelForAKey(key string, level uint32, segmentIndex in
 		return "", CustomError.ErrKeyDoesNotExist
 	}
 	d.Manifest.SegmentLevels[level].Mu.Lock()
-	l.Infof("Attempting to check segment file %d for key %s", d.Manifest.SegmentLevels[level].Segments[segmentIndex].SegmentId, key)
+	sz := len(d.Manifest.SegmentLevels[level].Segments)
+	d.Manifest.SegmentLevels[level].Mu.Unlock()
+	if sz <= segmentIndex {
+		return d.CheckALevelForAKey(key, level, sz-1)
+	}
 
+	d.Manifest.SegmentLevels[level].Mu.Lock()
+	l.Infof("Attempting to check segment file %d for key %s", d.Manifest.SegmentLevels[level].Segments[segmentIndex].SegmentId, key)
 	memtable := memtable.GetNewMemTable(d.Manifest.DbName, -1) // passing -1 cuz segmentId will be updated in the next line
 	l.Debugln(d.Manifest.SegmentLevels[level].Segments[segmentIndex])
 	memtable.LoadFromSegmentFile(d.Manifest.SegmentLevels[level].Segments[segmentIndex].SegmentId)
