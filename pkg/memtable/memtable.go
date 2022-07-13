@@ -26,14 +26,17 @@ import (
 
 */
 
-type HashMap map[string]KeyEntry.KeyEntry
+type HashMap struct {
+	M  map[string]KeyEntry.KeyEntry
+	Mu *sync.Mutex
+}
 
 const MAXSIZE uint64 = 4 * 1024
 
 type MemTable struct {
 	DbName        string
 	BytesOccupied uint64 // total nunber of bytes occupied
-	Memtable      HashMap
+	Map           *HashMap
 	SegmentId     int32
 	Mu            *sync.Mutex
 	Wg            *sync.WaitGroup
@@ -44,7 +47,7 @@ func GetNewMemTable(dbName string, SegmentId int32) *MemTable {
 	memtable := &MemTable{
 		DbName:        dbName,
 		BytesOccupied: 0,
-		Memtable:      make(HashMap),
+		Map:           &HashMap{M: make(map[string]KeyEntry.KeyEntry), Mu: &sync.Mutex{}},
 		Mu:            &sync.Mutex{},
 		Wg:            &sync.WaitGroup{},
 		SegmentId:     int32(SegmentId),
@@ -54,7 +57,9 @@ func GetNewMemTable(dbName string, SegmentId int32) *MemTable {
 }
 
 func (mt *MemTable) Get(key string) (string, error) {
-	kv, exist := mt.Memtable[key]
+	mt.Map.Mu.Lock()
+	defer mt.Map.Mu.Unlock()
+	kv, exist := mt.Map.M[key]
 
 	if !exist {
 		return "", CustomError.ErrKeyDoesNotExist
@@ -64,8 +69,16 @@ func (mt *MemTable) Get(key string) (string, error) {
 }
 
 func (mt *MemTable) Put(key string, value string) error {
+	// var l = utils.Logger.WithFields(logrus.Fields{
+	// 	"method":      "Put",
+	// 	"param_key":   key,
+	// 	"param_value": value,
+	// })
 
-	oldKeyEntry, alreadyExists := mt.Memtable[key]
+	mt.Map.Mu.Lock()
+	defer mt.Map.Mu.Unlock()
+
+	oldKeyEntry, alreadyExists := mt.Map.M[key]
 
 	oldBytes := 0
 
@@ -79,38 +92,15 @@ func (mt *MemTable) Put(key string, value string) error {
 		return CustomError.ErrMaxSizeExceeded
 	}
 
-	mt.Memtable[key] = KeyEntry.KeyEntry{
+	mt.Map.M[key] = KeyEntry.KeyEntry{
 		Timestamp: time.Now().Unix(),
 		Value:     value,
 	}
+	// l.Debugf("Stored value to map at %d", mt.Map.M[key].Timestamp)
 	mt.BytesOccupied += uint64(newBytes - oldBytes) // 8 for timestamp
 
 	return nil
 }
-
-// // special function where timestamps are also provided (mainly used in merge-compaction)
-// // No support for function overloading in Golang :( thus a diff name
-// func (mt *MemTable) PutWithTimestamp(key string, value string, timestamp int64) error {
-// 	_, alreadyExists := mt.Memtable[key]
-
-// 	mt.Memtable[key] = KeyEntry.KeyEntry{
-// 		Timestamp: timestamp,
-// 		Value:     value,
-// 	}
-
-// 	if alreadyExists {
-// 		return nil
-// 	}
-
-// 	if mt.BytesOccupied+uint64(len(key)+len(value)) > MAXSIZE {
-// 		// copy all the memtable to segment file --> disk write
-// 		return CustomError.ErrMaxSizeExceeded
-// 	}
-
-// 	mt.BytesOccupied += uint64((len(key) + len(value) + 8)) // 8 for timestamp
-
-// 	return nil
-// }
 
 func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
 
@@ -161,7 +151,7 @@ func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
 			Timestamp: timestamp,
 			Value:     value,
 		}
-		mt.Memtable[key] = kv
+		mt.Map.M[key] = kv
 	}
 	mt.SegmentId = int32(SegmentId)
 	return nil
@@ -170,11 +160,13 @@ func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
 // returns the (written segment file name, whether it already existed, cardinality of segment) along with error
 func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 
+	mt.Map.Mu.Lock()
+	defer mt.Map.Mu.Unlock()
+
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
 	})
 	l.Info("Writing Memtable to Segment file !!")
-	l.Debugln(mt.Memtable)
 
 	path := config.Config.Path
 
@@ -204,7 +196,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 
 	sortedKeys := []string{}
 
-	for key := range mt.Memtable {
+	for key := range mt.Map.M {
 		sortedKeys = append(sortedKeys, key)
 	}
 
@@ -214,7 +206,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 	var bytesArr []byte
 
 	for _, key := range sortedKeys {
-		kv := mt.Memtable[key]
+		kv := mt.Map.M[key]
 		_, data := format.EncodeKeyValue(kv.Timestamp, key, kv.Value)
 		bytesArr = append(bytesArr, data...)
 	}
@@ -229,14 +221,16 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 }
 
 func (mt *MemTable) Contains(key string) bool {
-	_, ok := mt.Memtable[key]
+	mt.Map.Mu.Lock()
+	defer mt.Map.Mu.Unlock()
+	_, ok := mt.Map.M[key]
 	return ok
 }
 
 // Clears the memtable
 func (mt *MemTable) Clear() {
-	for k := range mt.Memtable {
-		delete(mt.Memtable, k)
+	for k := range mt.Map.M {
+		delete(mt.Map.M, k)
 	}
 	mt.BytesOccupied = 0
 }

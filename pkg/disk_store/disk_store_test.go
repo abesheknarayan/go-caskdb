@@ -50,8 +50,6 @@ func Test_MultipleSegments(t *testing.T) {
 
 	numChecks := rand.Intn(N-1) + 1
 
-	fmt.Println(db.Manifest)
-
 	for i := 0; i < numChecks; i++ {
 		nKey := allKeys[rand.Intn(N)]
 		assert.Equal(t, m[nKey], db.Get(nKey), "Values are not equal!!")
@@ -73,15 +71,60 @@ func Test_MergeCompaction(t *testing.T) {
 
 	numChecks := rand.Intn(N-1) + 1
 
-	fmt.Println(db.Manifest)
-
 	for i := 0; i < numChecks; i++ {
 		nKey := allKeys[rand.Intn(N)]
 		assert.Equal(t, m[nKey], db.Get(nKey), "Values are not equal!!")
 	}
 }
 
-func Test_DbCleaup(t *testing.T) {
+func BenchmarkInsertionAlone10000(b *testing.B) {
+	N := 10000
+	M := 700
+	for i := 0; i < N; i++ {
+		// maintaining a field of just 300 elements
+		key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
+		value := fmt.Sprintf("Value: %d", (rand.Int()%M + 1))
+		db.Put(key, value)
+	}
+
+}
+
+func BenchmarkInsertionWithGet10000(b *testing.B) {
+	N := 10000
+	M := 700
+	m := make(map[string]string)
+	var allKeys []string
+
+	for i := 0; i < N; i++ {
+		x := rand.Int() % 2
+		switch x {
+		case 0:
+			{
+				// maintaining a field of 700 elements
+				key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
+				value := fmt.Sprintf("Value: %d", (rand.Int()%M + 1))
+				m[key] = value
+				allKeys = append(allKeys, key)
+				db.Put(key, value)
+			}
+		case 1:
+			{
+				if len(allKeys) == 0 {
+					continue
+				}
+				nKey := allKeys[rand.Intn(len(allKeys))]
+				val, exists := m[nKey]
+				if !exists {
+					continue
+				}
+				nval := db.Get(nKey)
+				assert.Equal(b, val, nval, "Values are not equal!!")
+			}
+		}
+	}
+}
+
+func Test_DbCleanup(t *testing.T) {
 	db.Put("name", "God")
 	db.CloseDB()
 	db.Cleanup()
