@@ -1,3 +1,3 @@
-name                      time/op
-InsertionAlone10000-12    2.24s ±11%
-InsertionWithGet10000-12  4.26s ± 4%
+name                       time/op
+InsertionAlone100000-12    0.74ns ± 3%
+InsertionWithGet100000-12  0.70ns ± 5%
