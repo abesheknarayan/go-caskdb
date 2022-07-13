@@ -342,7 +342,6 @@ func (d *DiskStore) ReadLevelByLevel(key string) (string, error) {
 	})
 	l.Infof("Reading level by level for key: %s\n", key)
 	d.Manifest.Mu.Lock()
-	l.Debugln(d.Manifest.SegmentLevels)
 	defer d.Manifest.Mu.Unlock()
 	for i := uint32(0); i < uint32(d.Manifest.NumberOfLevels); i++ {
 		d.Manifest.SegmentLevels[i].Mu.Lock()
@@ -472,8 +471,6 @@ func (d *DiskStore) CloseDB() {
 	d.MergeCompactorWg.Wait()
 
 	// write memtable to segment file and clear it
-
-	// TODO: write memtable to level 0 file
 
 	// newly created db closed without actually writing to disk
 	if d.Manifest.NumberOfLevels == 0 {

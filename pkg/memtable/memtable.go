@@ -69,11 +69,11 @@ func (mt *MemTable) Get(key string) (string, error) {
 }
 
 func (mt *MemTable) Put(key string, value string) error {
-	var l = utils.Logger.WithFields(logrus.Fields{
-		"method":      "Put",
-		"param_key":   key,
-		"param_value": value,
-	})
+	// var l = utils.Logger.WithFields(logrus.Fields{
+	// 	"method":      "Put",
+	// 	"param_key":   key,
+	// 	"param_value": value,
+	// })
 
 	mt.Map.Mu.Lock()
 	defer mt.Map.Mu.Unlock()
@@ -96,7 +96,7 @@ func (mt *MemTable) Put(key string, value string) error {
 		Timestamp: time.Now().Unix(),
 		Value:     value,
 	}
-	l.Debugf("Stored value to map at %d", mt.Map.M[key].Timestamp)
+	// l.Debugf("Stored value to map at %d", mt.Map.M[key].Timestamp)
 	mt.BytesOccupied += uint64(newBytes - oldBytes) // 8 for timestamp
 
 	return nil

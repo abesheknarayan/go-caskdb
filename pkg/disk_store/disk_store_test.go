@@ -77,9 +77,9 @@ func Test_MergeCompaction(t *testing.T) {
 	}
 }
 
-func BenchmarkInsertionAlone(b *testing.B) {
+func BenchmarkInsertionAlone10000(b *testing.B) {
 	N := 10000
-	M := 300
+	M := 700
 	for i := 0; i < N; i++ {
 		// maintaining a field of just 300 elements
 		key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
@@ -89,7 +89,7 @@ func BenchmarkInsertionAlone(b *testing.B) {
 
 }
 
-func BenchmarkInsertionWithGet(b *testing.B) {
+func BenchmarkInsertionWithGet10000(b *testing.B) {
 	N := 10000
 	M := 700
 	m := make(map[string]string)

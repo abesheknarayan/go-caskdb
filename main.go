@@ -21,6 +21,8 @@ func main() {
 		log.Fatalf("Failed to initialize DB %v", err)
 	}
 
+	// utils.Logger.SetLevel(logrus.ErrorLevel)
+
 	N := 10000
 	M := 700
 	m := make(map[string]string)
@@ -32,9 +34,9 @@ func main() {
 			{
 				key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
 				value := fmt.Sprintf("Value: %d", (rand.Int()%M + 1))
-				m[key] = value
-				allKeys = append(allKeys, key)
 				booksDb.Put(key, value)
+				allKeys = append(allKeys, key)
+				m[key] = value
 			}
 		case 1:
 			{
