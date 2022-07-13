@@ -216,10 +216,9 @@ func (d *DiskStore) Put(key string, value string) {
 		// Important point to note here is that, during the time between auxillary go routine waiting to write to this step in the next run, all writes and reads are supported using memtable and aux memtable so no issues with reads and writes
 		if d.AuxillaryMemtable != nil {
 			l.Infoln("Waiting for aux memtable write to disk to finish")
-			// d.AuxillaryMemtable.Mu.Lock()
+			d.AuxillaryMemtable.Mu.Lock()
 			d.AuxillaryMemtable.Wg.Wait()
-			// d.AuxillaryMemtable.Mu.Unlock()
-
+			d.AuxillaryMemtable.Mu.Unlock()
 		}
 		l.Infoln("Writing memtable to aux")
 		d.AuxillaryMemtable = d.Memtable
@@ -228,7 +227,10 @@ func (d *DiskStore) Put(key string, value string) {
 		go func() {
 			// find segment id
 			l.Infoln("Writing Auxillary memtable to disk")
+
+			d.AuxillaryMemtable.Mu.Lock()
 			d.AuxillaryMemtable.Wg.Add(1)
+			d.AuxillaryMemtable.Mu.Unlock()
 
 			// TODO trigger compaction for level 0 to 1 specially here
 			if d.Manifest.NumberOfLevels == 0 {
@@ -251,11 +253,13 @@ func (d *DiskStore) Put(key string, value string) {
 
 			// append only if its newly added file
 			if !exists {
+				d.Manifest.SegmentLevels[0].Mu.Lock()
 				d.Manifest.SegmentLevels[0].Segments = append(d.Manifest.SegmentLevels[0].Segments, SegmentMetadata{
 					SegmentId:   uint32(d.AuxillaryMemtable.SegmentId),
 					Cardinality: cardinality,
 					Mu:          &sync.Mutex{},
 				})
+				d.Manifest.SegmentLevels[0].Mu.Unlock()
 
 				// unlock specifically here because next function locks it
 				d.Manifest.Mu.Unlock()
@@ -299,6 +303,11 @@ func (d *DiskStore) Get(key string) string {
 	l.Infoln("Attempting to get value for key")
 	value, err := d.Memtable.Get(key)
 
+	if err == nil {
+		l.Debugf("got value: %s for key %s from memtable", value, key)
+		return value
+	}
+
 	if err != nil && errors.Is(err, CustomError.ErrKeyDoesNotExist) {
 		// check auxillary memtable
 
@@ -306,27 +315,40 @@ func (d *DiskStore) Get(key string) string {
 			value, err = d.AuxillaryMemtable.Get(key)
 		}
 
+		if err == nil {
+			l.Debugf("got value: %s for key %s from Auxillary table", value, key)
+			return value
+		}
+
 		if err != nil && errors.Is(err, CustomError.ErrKeyDoesNotExist) {
 			// check all the segments one by one from the most recent
 
-			d.Manifest.Mu.Lock()
 			value, err = d.ReadLevelByLevel(key)
-			d.Manifest.Mu.Unlock()
 
 			if err != nil && errors.Is(err, CustomError.ErrKeyDoesNotExist) {
 				return ""
 			}
+			return value
 		}
-		return value
 	}
-
 	return value
 }
 
 // Reads the Segment files level by level starting from L0 to LN (where N is a variable)
 func (d *DiskStore) ReadLevelByLevel(key string) (string, error) {
+	var l = utils.Logger.WithFields(logrus.Fields{
+		"method":    "ReadLevelByLevel",
+		"param_key": key,
+	})
+	l.Infof("Reading level by level for key: %s\n", key)
+	d.Manifest.Mu.Lock()
+	l.Debugln(d.Manifest.SegmentLevels)
+	defer d.Manifest.Mu.Unlock()
 	for i := uint32(0); i < uint32(d.Manifest.NumberOfLevels); i++ {
+		d.Manifest.SegmentLevels[i].Mu.Lock()
 		numberOfSegmentsInCurrentLevel := len(d.Manifest.SegmentLevels[i].Segments)
+		d.Manifest.SegmentLevels[i].Mu.Unlock()
+
 		val, err := d.CheckALevelForAKey(key, i, numberOfSegmentsInCurrentLevel-1)
 		if err != nil && errors.Is(err, CustomError.ErrKeyDoesNotExist) {
 			continue
@@ -348,14 +370,16 @@ func (d *DiskStore) CheckALevelForAKey(key string, level uint32, segmentIndex in
 	if segmentIndex < 0 {
 		return "", CustomError.ErrKeyDoesNotExist
 	}
-	l.Infof("Attempting to check segment file %d for key %s", segmentIndex, key)
+	d.Manifest.SegmentLevels[level].Mu.Lock()
+	l.Infof("Attempting to check segment file %d for key %s", d.Manifest.SegmentLevels[level].Segments[segmentIndex].SegmentId, key)
 
 	memtable := memtable.GetNewMemTable(d.Manifest.DbName, -1) // passing -1 cuz segmentId will be updated in the next line
-	d.Manifest.SegmentLevels[level].Mu.Lock()
+	l.Debugln(d.Manifest.SegmentLevels[level].Segments[segmentIndex])
 	memtable.LoadFromSegmentFile(d.Manifest.SegmentLevels[level].Segments[segmentIndex].SegmentId)
 	d.Manifest.SegmentLevels[level].Mu.Unlock()
 
 	value, err := memtable.Get(key)
+	l.Debugf("Got value :%s,%v", value, err)
 	if err != nil && errors.Is(err, CustomError.ErrKeyDoesNotExist) {
 		// check before segment file recursively
 		return d.CheckALevelForAKey(key, level, segmentIndex-1)
@@ -381,16 +405,22 @@ func (d *DiskStore) Cleanup() {
 	})
 	l.Infoln("Cleaning up the database")
 
+	// wait for merge compactor process
+	d.MergeCompactorWg.Wait()
+
 	// clear the segments slice
 	d.Manifest.Mu.Lock()
 	d.Manifest.NumberOfLevels = 0
+
+	// segment levels maybe locked in merge compaction
 	d.Manifest.SegmentLevels = []SegmentLevelMetadata{}
-	d.Manifest.Mu.Unlock()
 
 	// delete everything including manifest file
 
 	path := config.Config.Path
 	dirPath := fmt.Sprintf("%s/%s", path, d.Manifest.DbName)
+	d.Manifest.Mu.Unlock()
+
 	err := os.RemoveAll(dirPath)
 	if err != nil {
 		l.Errorln(err)

@@ -47,6 +47,7 @@ func InitLogger() {
 	case "Test":
 		{
 			writer = os.Stdout
+			Logger.Level = logrus.ErrorLevel
 		}
 	case "Prod":
 		{
