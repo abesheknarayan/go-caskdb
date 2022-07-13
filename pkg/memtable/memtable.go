@@ -31,8 +31,6 @@ type HashMap struct {
 	Mu *sync.Mutex
 }
 
-const MAXSIZE uint64 = 4 * 1024
-
 type MemTable struct {
 	DbName        string
 	BytesOccupied uint64 // total nunber of bytes occupied
@@ -87,7 +85,7 @@ func (mt *MemTable) Put(key string, value string) error {
 	}
 	newBytes := len(key) + len(value) + 8
 
-	if mt.BytesOccupied+uint64(newBytes-oldBytes) > MAXSIZE {
+	if mt.BytesOccupied+uint64(newBytes-oldBytes) > config.MAX_MEMTABLE_SIZE {
 		// copy all the memtable to segment file --> disk write
 		return CustomError.ErrMaxSizeExceeded
 	}
