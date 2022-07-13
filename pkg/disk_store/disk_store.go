@@ -119,9 +119,6 @@ func InitDb(dbName string) (*DiskStore, error) {
 		d.Memtable.LoadFromSegmentFile(d.Manifest.SegmentLevels[0].Segments[len(d.Manifest.SegmentLevels[0].Segments)-1].SegmentId)
 	}
 
-	// TODO
-	// d.loadHashIndex()
-
 	return d, nil
 }
 
@@ -190,12 +187,6 @@ func createDb(dbName string, dbPath string) (*DiskStore, error) {
 		MergeCompactorWg:  &sync.WaitGroup{},
 	}
 
-	// TODO
-	// err = d.loadHashIndex()
-	// if err != nil {
-	// 	return nil, err
-	// }
-
 	return d, nil
 }
 
@@ -232,7 +223,6 @@ func (d *DiskStore) Put(key string, value string) {
 			d.AuxillaryMemtable.Wg.Add(1)
 			d.AuxillaryMemtable.Mu.Unlock()
 
-			// TODO trigger compaction for level 0 to 1 specially here
 			if d.Manifest.NumberOfLevels == 0 {
 				d.Manifest.Mu.Lock()
 				d.Manifest.NumberOfLevels = 1
