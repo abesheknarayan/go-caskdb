@@ -226,8 +226,6 @@ func (mt *MemTable) CopyMemtable(mt2 *MemTable) {
 	mt.BytesOccupied = mt2.BytesOccupied
 	mt.Map = mt2.Map
 	mt.SegmentId = mt2.SegmentId
-	mt.Mu = mt2.Mu
-	mt.Wg = mt2.Wg
 }
 
 func (mt *MemTable) Contains(key string) bool {

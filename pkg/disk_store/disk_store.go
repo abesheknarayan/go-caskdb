@@ -212,8 +212,12 @@ func (d *DiskStore) Put(key string, value string) {
 			d.AuxillaryMemtable.Mu.Unlock()
 		}
 		l.Infoln("Writing memtable to aux")
-		d.AuxillaryMemtable = memtable.GetNewMemTable(d.Manifest.DbName, d.Memtable.SegmentId)
+		if d.AuxillaryMemtable == nil {
+			d.AuxillaryMemtable = memtable.GetNewMemTable(d.Manifest.DbName, d.Memtable.SegmentId)
+		}
+		d.AuxillaryMemtable.Mu.Lock()
 		d.AuxillaryMemtable.CopyMemtable(d.Memtable)
+		d.AuxillaryMemtable.Mu.Unlock()
 		d.Memtable = memtable.GetNewMemTable(d.Manifest.DbName, int32(d.GetNewSegmentId()))
 
 		go func() {
@@ -276,6 +280,7 @@ func (d *DiskStore) Put(key string, value string) {
 
 // finds the segment object using the segment id and update its cardinality
 func (d *DiskStore) FindForSegmendAndUpdate(segmentId uint32, cardinality uint32) {
+	d.Manifest.Mu.Lock()
 	for i := 0; i < int(d.Manifest.NumberOfLevels); i++ {
 		for j := 0; j < len(d.Manifest.SegmentLevels[i].Segments); j++ {
 			d.Manifest.SegmentLevels[i].Mu.Lock()
@@ -287,6 +292,8 @@ func (d *DiskStore) FindForSegmendAndUpdate(segmentId uint32, cardinality uint32
 			d.Manifest.SegmentLevels[i].Mu.Unlock()
 		}
 	}
+	d.Manifest.Mu.Unlock()
+
 }
 
 func (d *DiskStore) Get(key string) string {
