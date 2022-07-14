@@ -31,13 +31,18 @@ type HashMap struct {
 	Mu *sync.Mutex
 }
 
+type ExclusiveWaitGroup struct {
+	Wg *sync.WaitGroup
+	Mu *sync.Mutex
+}
+
 type MemTable struct {
 	DbName        string
 	BytesOccupied uint64 // total nunber of bytes occupied
 	Map           *HashMap
 	SegmentId     int32
 	Mu            *sync.Mutex
-	Wg            *sync.WaitGroup
+	ExWaitGroup   *ExclusiveWaitGroup
 }
 
 func GetNewMemTable(dbName string, SegmentId int32) *MemTable {
@@ -47,7 +52,7 @@ func GetNewMemTable(dbName string, SegmentId int32) *MemTable {
 		BytesOccupied: 0,
 		Map:           &HashMap{M: make(map[string]KeyEntry.KeyEntry), Mu: &sync.Mutex{}},
 		Mu:            &sync.Mutex{},
-		Wg:            &sync.WaitGroup{},
+		ExWaitGroup:   &ExclusiveWaitGroup{Wg: &sync.WaitGroup{}, Mu: &sync.Mutex{}},
 		SegmentId:     int32(SegmentId),
 	}
 
@@ -67,14 +72,12 @@ func (mt *MemTable) Get(key string) (string, error) {
 }
 
 func (mt *MemTable) Put(key string, value string) error {
-	// var l = utils.Logger.WithFields(logrus.Fields{
-	// 	"method":      "Put",
-	// 	"param_key":   key,
-	// 	"param_value": value,
-	// })
-
+	mt.Mu.Lock()
 	mt.Map.Mu.Lock()
-	defer mt.Map.Mu.Unlock()
+	defer func() {
+		mt.Map.Mu.Unlock()
+		mt.Mu.Unlock()
+	}()
 
 	oldKeyEntry, alreadyExists := mt.Map.M[key]
 
@@ -101,6 +104,9 @@ func (mt *MemTable) Put(key string, value string) error {
 }
 
 func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
+
+	mt.Mu.Lock()
+	defer mt.Mu.Unlock()
 
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "LoadFromSegmentFile",
@@ -158,13 +164,15 @@ func (mt *MemTable) LoadFromSegmentFile(SegmentId uint32) error {
 // returns the (written segment file name, whether it already existed, cardinality of segment) along with error
 func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 
-	mt.Map.Mu.Lock()
-	defer mt.Map.Mu.Unlock()
-
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
 	})
 	l.Infof("Writing Memtable %d to Segment file !!", mt.SegmentId)
+
+	mt.Mu.Lock()
+	defer func() {
+		mt.Mu.Unlock()
+	}()
 
 	path := config.Config.Path
 
@@ -221,23 +229,31 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 
 // copies all the contents of mt2 onto mt1
 func (mt *MemTable) CopyMemtable(mt2 *MemTable) {
-	mt.Mu.Lock()
 	mt.DbName = mt2.DbName
 	mt.BytesOccupied = mt2.BytesOccupied
 	mt.Map = mt2.Map
 	mt.SegmentId = mt2.SegmentId
-	mt.Mu.Unlock()
 }
 
 func (mt *MemTable) Contains(key string) bool {
+	mt.Mu.Lock()
 	mt.Map.Mu.Lock()
-	defer mt.Map.Mu.Unlock()
+	defer func() {
+		mt.Map.Mu.Unlock()
+		mt.Mu.Unlock()
+	}()
 	_, ok := mt.Map.M[key]
 	return ok
 }
 
 // Clears the memtable
 func (mt *MemTable) Clear() {
+	mt.Mu.Lock()
+	mt.Map.Mu.Lock()
+	defer func() {
+		mt.Map.Mu.Unlock()
+		mt.Mu.Unlock()
+	}()
 	for k := range mt.Map.M {
 		delete(mt.Map.M, k)
 	}
