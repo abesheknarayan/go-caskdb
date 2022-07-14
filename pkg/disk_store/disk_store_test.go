@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/abesheknarayan/go-caskdb/pkg/config"
 	"github.com/abesheknarayan/go-caskdb/pkg/utils"
@@ -36,50 +37,98 @@ func Test_Persistance(t *testing.T) {
 	}
 	assert.Equal(t, "cr7", db.Get("football"), "Persistance failure!")
 }
-func Test_MultipleSegments(t *testing.T) {
-	N := 1000
+
+func InsertAndRead(N int, t *testing.T) {
+	t_db, err := InitDb(fmt.Sprintf("normalDb%d", time.Now().Unix()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	m := make(map[string]string)
 	allKeys := make([]string, N)
 	for i := 0; i < N; i++ {
-		key := utils.GetRandomString(rand.Int()%10 + 1)
-		value := utils.GetRandomString(rand.Int()%10 + 1)
+		key := utils.GetRandomString(rand.Int()%10 + 3)
+		value := utils.GetRandomString(rand.Int()%10 + 5)
 		allKeys = append(allKeys, key)
 		m[key] = value
-		db.Put(key, value)
+		t_db.Put(key, value)
 	}
 
 	numChecks := rand.Intn(N-1) + 1
 
 	for i := 0; i < numChecks; i++ {
-		nKey := allKeys[rand.Intn(N)]
-		assert.Equal(t, m[nKey], db.Get(nKey), "Values are not equal!!")
+		if len(allKeys) == 0 {
+			continue
+		}
+		nKey := allKeys[rand.Intn(len(allKeys))]
+		val, exists := m[nKey]
+		if !exists {
+			continue
+		}
+		nval := t_db.Get(nKey)
+		assert.Equal(t, val, nval, "Values are not equal!!")
+	}
+}
+func Test_InsertionFirstAndReads(t *testing.T) {
+	N := 100000
+	config.Config.MemtableSizeLimit = 4 * 1024 * 1024
+	InsertAndRead(N, t)
+	N = 10000
+	config.Config.MemtableSizeLimit = 4 * 1024
+	InsertAndRead(N, t)
+}
+
+func InsertWithConcurrentReads(N int, M int, t *testing.T) {
+	m := make(map[string]string)
+	var allKeys []string
+	t_db, err := InitDb(fmt.Sprintf("concurrentDb%d", time.Now().Unix()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < N; i++ {
+		x := rand.Int() % 2
+		switch x {
+		case 0:
+			{
+				// maintaining a field of 700 elements
+				key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
+				value := fmt.Sprintf("Value: %d", (rand.Int()%M + 1))
+				m[key] = value
+				allKeys = append(allKeys, key)
+				t_db.Put(key, value)
+			}
+		case 1:
+			{
+				if len(allKeys) == 0 {
+					continue
+				}
+				nKey := allKeys[rand.Intn(len(allKeys))]
+				val, exists := m[nKey]
+				if !exists {
+					continue
+				}
+				nval := t_db.Get(nKey)
+				assert.Equal(t, val, nval, "Values are not equal!!")
+			}
+		}
 	}
 }
 
-func Test_MergeCompaction(t *testing.T) {
-	N := 5000
-	m := make(map[string]string)
-	allKeys := make([]string, N)
-	for i := 0; i < N; i++ {
-		// maintaining a field of just 300 elements
-		key := fmt.Sprintf("Key: %d", (rand.Int()%300 + 1))
-		value := fmt.Sprintf("Value: %d", (rand.Int()%300 + 1))
-		allKeys = append(allKeys, key)
-		m[key] = value
-		db.Put(key, value)
-	}
-
-	numChecks := rand.Intn(N-1) + 1
-
-	for i := 0; i < numChecks; i++ {
-		nKey := allKeys[rand.Intn(N)]
-		assert.Equal(t, m[nKey], db.Get(nKey), "Values are not equal!!")
-	}
+func Test_InsertionWithConcurrentReads(t *testing.T) {
+	N := 100000
+	M := 3167
+	config.Config.MemtableSizeLimit = 4 * 1024 * 1024
+	InsertWithConcurrentReads(N, M, t)
+	N = 10000
+	M = 967
+	config.Config.MemtableSizeLimit = 4 * 1024
+	InsertWithConcurrentReads(N, M, t)
 }
 
 func BenchmarkInsertionAlone100000(b *testing.B) {
 	N := 100000
 	M := 3167
+	config.Config.MemtableSizeLimit = 4 * 1024 * 1024
 	for i := 0; i < N; i++ {
 		// maintaining a field of just 300 elements
 		key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
@@ -92,6 +141,7 @@ func BenchmarkInsertionAlone100000(b *testing.B) {
 func BenchmarkInsertionWithGet100000(b *testing.B) {
 	N := 100000
 	M := 3167
+	config.Config.MemtableSizeLimit = 4 * 1024 * 1024
 	m := make(map[string]string)
 	var allKeys []string
 

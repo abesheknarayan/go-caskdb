@@ -18,8 +18,8 @@ printf "\nUnit Tests complete. Performing Integration Tests now.\n"
 
 echo "...running integration tests..."
 
-# go test -v -race -run="^(Test|Benchmark)_(.*)" ./... > logs/test/integration.log
-go test -v -race -run="^(Test)_(.*)" -timeout 30s ./... 
+# go test -v -race -run="^(Test)_(.*)" ./...  > logs/integration.log
+go test -v -race -run="^(Test)_(.*)" ./... 
 
 
 code=$?

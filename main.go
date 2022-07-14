@@ -10,6 +10,68 @@ import (
 	utils "github.com/abesheknarayan/go-caskdb/pkg/utils"
 )
 
+func TestInsertionAndRead(db *store.DiskStore) {
+	N := 2000
+	m := make(map[string]string)
+	allKeys := make([]string, N)
+	for i := 0; i < N; i++ {
+		key := utils.GetRandomString(rand.Int()%10 + 3)
+		value := utils.GetRandomString(rand.Int()%10 + 3)
+		allKeys = append(allKeys, key)
+		m[key] = value
+		db.Put(key, value)
+	}
+
+	numChecks := rand.Intn(N-1) + 1
+
+	for i := 0; i < numChecks; i++ {
+		if len(allKeys) == 0 {
+			continue
+		}
+		nKey := allKeys[rand.Intn(len(allKeys))]
+		val, exists := m[nKey]
+		if !exists {
+			continue
+		}
+		nval := db.Get(nKey)
+		if val != nval {
+			utils.Logger.Errorf("Values are not equal for key: %s, expected: %s, got %s", nKey, val, nval)
+		}
+	}
+}
+
+func TestConcurrentInsertionAndRead(db *store.DiskStore) {
+	N := 10000
+	M := 1400
+	m := make(map[string]string)
+	var allKeys []string
+	for i := 0; i < N; i++ {
+		x := rand.Int() % 2
+		switch x {
+		case 0:
+			{
+				key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
+				value := fmt.Sprintf("Value: %d", (rand.Int()%M + 1))
+				db.Put(key, value)
+				allKeys = append(allKeys, key)
+				m[key] = value
+			}
+		case 1:
+			{
+				nKey := allKeys[rand.Intn(len(allKeys))]
+				val, exists := m[nKey]
+				if !exists {
+					continue
+				}
+				nval := db.Get(nKey)
+				if nval != val {
+					utils.Logger.Errorf("Values are not equal for key: %s, expected: %s, got %s", nKey, val, nval)
+				}
+			}
+		}
+	}
+}
+
 func main() {
 
 	config.LoadConfigFromEnv()
@@ -21,53 +83,8 @@ func main() {
 		log.Fatalf("Failed to initialize DB %v", err)
 	}
 
-	// utils.Logger.SetLevel(logrus.ErrorLevel)
-
-	N := 10000
-	M := 700
-	m := make(map[string]string)
-	var allKeys []string
-	for i := 0; i < N; i++ {
-		x := rand.Int() % 2
-		switch x {
-		case 0:
-			{
-				key := fmt.Sprintf("Key: %d", (rand.Int()%M + 1))
-				value := fmt.Sprintf("Value: %d", (rand.Int()%M + 1))
-				booksDb.Put(key, value)
-				allKeys = append(allKeys, key)
-				m[key] = value
-			}
-		case 1:
-			{
-				nKey := allKeys[rand.Intn(len(allKeys))]
-				val, exists := m[nKey]
-				if !exists {
-					continue
-				}
-				nval := booksDb.Get(nKey)
-				if nval != val {
-					utils.Logger.Errorf("Values are not equal for key: %s, expected: %s, got %s", nKey, val, nval)
-				}
-			}
-		}
-	}
-
-	// for i := 0; i < 1000; i++ {
-	// 	// key := utils.GetRandomString(rand.Int()%10 + 1)
-	// 	// value := utils.GetRandomString(rand.Int()%10 + 1)
-	// 	key := fmt.Sprintf("Key %d", rand.Int()%3000)
-	// 	value := fmt.Sprintf("Value %d", rand.Int()%3000)
-	// 	// fmt.Println(key, value)
-	// 	booksDb.Put(key, value)
-	// }
-
-	// utils.Logger.Debugln(booksDb.Get("Key 123"))
-	// utils.Logger.Debugln(booksDb.Get("Key 33"))
-
-	// utils.Logger.Debugln(booksDb.Get("Key 477"))
-	// utils.Logger.Debugln(booksDb.Get("Key 1"))
-	// utils.Logger.Debugln(booksDb.Get("Key 930"))
+	// TestInsertionAndRead(booksDb)
+	TestConcurrentInsertionAndRead(booksDb)
 
 	booksDb.CloseDB()
 	// booksDb.Cleanup()

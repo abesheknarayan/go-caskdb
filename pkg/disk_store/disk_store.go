@@ -212,7 +212,12 @@ func (d *DiskStore) Put(key string, value string) {
 			d.AuxillaryMemtable.Mu.Unlock()
 		}
 		l.Infoln("Writing memtable to aux")
-		d.AuxillaryMemtable = d.Memtable
+		if d.AuxillaryMemtable == nil {
+			d.AuxillaryMemtable = memtable.GetNewMemTable(d.Manifest.DbName, d.Memtable.SegmentId)
+		}
+		d.AuxillaryMemtable.Mu.Lock()
+		d.AuxillaryMemtable.CopyMemtable(d.Memtable)
+		d.AuxillaryMemtable.Mu.Unlock()
 		d.Memtable = memtable.GetNewMemTable(d.Manifest.DbName, int32(d.GetNewSegmentId()))
 
 		go func() {
@@ -223,26 +228,29 @@ func (d *DiskStore) Put(key string, value string) {
 			d.AuxillaryMemtable.Wg.Add(1)
 			d.AuxillaryMemtable.Mu.Unlock()
 
+			d.Manifest.Mu.Lock()
 			if d.Manifest.NumberOfLevels == 0 {
-				d.Manifest.Mu.Lock()
 				d.Manifest.NumberOfLevels = 1
 				d.Manifest.SegmentLevels = append(d.Manifest.SegmentLevels, SegmentLevelMetadata{
 					Segments: []SegmentMetadata{},
 					Mu:       &sync.Mutex{},
 				})
 				d.InitMergeCompactor(0)
-				d.Manifest.Mu.Unlock()
 			}
+			d.Manifest.Mu.Unlock()
+			l.Debugln("here 2")
 
 			// send a compaction signal to level 0 channel which will be listening somewhere
 			cardinality, exists, err := d.AuxillaryMemtable.WriteMemtableToDisk() // this is the writing to disk function
 			if err != nil {
 				l.Fatalln(err)
 			}
-			d.Manifest.Mu.Lock()
+			l.Debugln("here 3")
 
 			// append only if its newly added file
 			if !exists {
+				l.Debugln("here 4")
+				d.Manifest.Mu.Lock()
 				d.Manifest.SegmentLevels[0].Mu.Lock()
 				d.Manifest.SegmentLevels[0].Segments = append(d.Manifest.SegmentLevels[0].Segments, SegmentMetadata{
 					SegmentId:   uint32(d.AuxillaryMemtable.SegmentId),
@@ -259,8 +267,8 @@ func (d *DiskStore) Put(key string, value string) {
 			} else {
 				// just update cardinality but we have to find the segment cuz it might not be in level 0
 				d.FindForSegmendAndUpdate(uint32(d.AuxillaryMemtable.SegmentId), cardinality)
-				d.Manifest.Mu.Unlock()
 			}
+			l.Debugln("here 5")
 			d.ChangeNumberOfSegmentsInManifest()
 			d.AuxillaryMemtable.Wg.Done()
 		}()
@@ -272,6 +280,7 @@ func (d *DiskStore) Put(key string, value string) {
 
 // finds the segment object using the segment id and update its cardinality
 func (d *DiskStore) FindForSegmendAndUpdate(segmentId uint32, cardinality uint32) {
+	d.Manifest.Mu.Lock()
 	for i := 0; i < int(d.Manifest.NumberOfLevels); i++ {
 		for j := 0; j < len(d.Manifest.SegmentLevels[i].Segments); j++ {
 			d.Manifest.SegmentLevels[i].Mu.Lock()
@@ -283,6 +292,8 @@ func (d *DiskStore) FindForSegmendAndUpdate(segmentId uint32, cardinality uint32
 			d.Manifest.SegmentLevels[i].Mu.Unlock()
 		}
 	}
+	d.Manifest.Mu.Unlock()
+
 }
 
 func (d *DiskStore) Get(key string) string {
@@ -400,15 +411,26 @@ func (d *DiskStore) Cleanup() {
 	})
 	l.Infoln("Cleaning up the database")
 
+	// wait for any memtable disk writes to finish
+	if d.AuxillaryMemtable != nil {
+		l.Infoln("Waiting for aux memtable write to disk to finish")
+		d.AuxillaryMemtable.Wg.Wait()
+	}
+
 	// wait for merge compactor process
 	d.MergeCompactorWg.Wait()
 
 	// clear the segments slice
 	d.Manifest.Mu.Lock()
 	d.Manifest.NumberOfLevels = 0
-
+	d.Manifest.MaxSegmentId = 1
 	// segment levels maybe locked in merge compaction
 	d.Manifest.SegmentLevels = []SegmentLevelMetadata{}
+
+	d.Memtable = memtable.GetNewMemTable(d.Manifest.DbName, 1)
+	d.AuxillaryMemtable = nil
+	d.HashIndex = HashIndex{}
+	d.MergeCompactor = []MergeCompactor{}
 
 	// delete everything including manifest file
 
@@ -485,9 +507,9 @@ func (d *DiskStore) CloseDB() {
 	if err != nil {
 		l.Fatalf("Error while writing memtable to disk %v", err)
 	}
-	d.Manifest.Mu.Lock()
 	// append only if its newly added file
 	if !exists {
+		d.Manifest.Mu.Lock()
 		d.Manifest.SegmentLevels[0].Segments = append(d.Manifest.SegmentLevels[0].Segments, SegmentMetadata{
 			SegmentId:   uint32(d.Memtable.SegmentId),
 			Cardinality: cardinality,
@@ -501,7 +523,6 @@ func (d *DiskStore) CloseDB() {
 	} else {
 		// just update cardinality
 		d.FindForSegmendAndUpdate(uint32(d.Memtable.SegmentId), cardinality)
-		d.Manifest.Mu.Unlock()
 	}
 	d.ChangeNumberOfSegmentsInManifest()
 	d.Memtable.Clear()

@@ -85,7 +85,7 @@ func (mt *MemTable) Put(key string, value string) error {
 	}
 	newBytes := len(key) + len(value) + 8
 
-	if mt.BytesOccupied+uint64(newBytes-oldBytes) > config.MAX_MEMTABLE_SIZE {
+	if mt.BytesOccupied+uint64(newBytes-oldBytes) > config.Config.MemtableSizeLimit {
 		// copy all the memtable to segment file --> disk write
 		return CustomError.ErrMaxSizeExceeded
 	}
@@ -164,7 +164,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
 	})
-	l.Info("Writing Memtable to Segment file !!")
+	l.Infof("Writing Memtable %d to Segment file !!", mt.SegmentId)
 
 	path := config.Config.Path
 
@@ -178,6 +178,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 		// file doesnt exist
 		exists = false
 	}
+	l.Debugln(exists)
 
 	f, err := os.OpenFile(segmentFilePath, os.O_RDWR|os.O_CREATE, 0666)
 
@@ -216,6 +217,15 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 	l.Debugf("Successfully written memtable to segfile %s with cardinality: %d", segmentFileName, uint32(len(sortedKeys)))
 
 	return uint32(len(sortedKeys)), exists, nil
+}
+
+// copies all the contents of mt2 onto mt1
+func (mt *MemTable) CopyMemtable(mt2 *MemTable) {
+	fmt.Println(mt, mt2)
+	mt.DbName = mt2.DbName
+	mt.BytesOccupied = mt2.BytesOccupied
+	mt.Map = mt2.Map
+	mt.SegmentId = mt2.SegmentId
 }
 
 func (mt *MemTable) Contains(key string) bool {
