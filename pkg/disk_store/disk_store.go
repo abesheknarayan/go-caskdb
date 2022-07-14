@@ -207,9 +207,11 @@ func (d *DiskStore) Put(key string, value string) {
 		// Important point to note here is that, during the time between auxillary go routine waiting to write to this step in the next run, all writes and reads are supported using memtable and aux memtable so no issues with reads and writes
 		if d.AuxillaryMemtable != nil {
 			l.Infoln("Waiting for aux memtable write to disk to finish")
-			d.AuxillaryMemtable.Mu.Lock()
-			d.AuxillaryMemtable.Wg.Wait()
-			d.AuxillaryMemtable.Mu.Unlock()
+			// d.AuxillaryMemtable.Mu.Lock()
+			d.AuxillaryMemtable.ExWaitGroup.Mu.Lock()
+			d.AuxillaryMemtable.ExWaitGroup.Wg.Wait()
+			d.AuxillaryMemtable.ExWaitGroup.Mu.Unlock()
+			// d.AuxillaryMemtable.Mu.Unlock()
 		}
 		l.Infoln("Writing memtable to aux")
 		if d.AuxillaryMemtable == nil {
@@ -224,9 +226,8 @@ func (d *DiskStore) Put(key string, value string) {
 			// find segment id
 			l.Infoln("Writing Auxillary memtable to disk")
 
-			d.AuxillaryMemtable.Mu.Lock()
-			d.AuxillaryMemtable.Wg.Add(1)
-			d.AuxillaryMemtable.Mu.Unlock()
+			d.AuxillaryMemtable.ExWaitGroup.Mu.Lock()
+			d.AuxillaryMemtable.ExWaitGroup.Wg.Add(1)
 
 			d.Manifest.Mu.Lock()
 			if d.Manifest.NumberOfLevels == 0 {
@@ -270,7 +271,9 @@ func (d *DiskStore) Put(key string, value string) {
 			}
 			l.Debugln("here 5")
 			d.ChangeNumberOfSegmentsInManifest()
-			d.AuxillaryMemtable.Wg.Done()
+			d.AuxillaryMemtable.ExWaitGroup.Wg.Done()
+			d.AuxillaryMemtable.ExWaitGroup.Mu.Unlock()
+
 		}()
 
 		// again call Put
@@ -414,7 +417,10 @@ func (d *DiskStore) Cleanup() {
 	// wait for any memtable disk writes to finish
 	if d.AuxillaryMemtable != nil {
 		l.Infoln("Waiting for aux memtable write to disk to finish")
-		d.AuxillaryMemtable.Wg.Wait()
+		d.AuxillaryMemtable.ExWaitGroup.Mu.Lock()
+		d.AuxillaryMemtable.ExWaitGroup.Wg.Wait()
+		d.AuxillaryMemtable.ExWaitGroup.Mu.Unlock()
+
 	}
 
 	// wait for merge compactor process
@@ -484,7 +490,9 @@ func (d *DiskStore) CloseDB() {
 	// wait for any memtable disk writes to finish
 	if d.AuxillaryMemtable != nil {
 		l.Infoln("Waiting for aux memtable write to disk to finish")
-		d.AuxillaryMemtable.Wg.Wait()
+		d.AuxillaryMemtable.ExWaitGroup.Mu.Lock()
+		d.AuxillaryMemtable.ExWaitGroup.Wg.Wait()
+		d.AuxillaryMemtable.ExWaitGroup.Mu.Unlock()
 	}
 	d.MergeCompactorWg.Wait()
 

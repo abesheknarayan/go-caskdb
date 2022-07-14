@@ -11,12 +11,12 @@ import (
 )
 
 func TestInsertionAndRead(db *store.DiskStore) {
-	N := 2000
+	N := 10000
 	m := make(map[string]string)
 	allKeys := make([]string, N)
 	for i := 0; i < N; i++ {
 		key := utils.GetRandomString(rand.Int()%10 + 3)
-		value := utils.GetRandomString(rand.Int()%10 + 3)
+		value := utils.GetRandomString(rand.Int()%10 + 5)
 		allKeys = append(allKeys, key)
 		m[key] = value
 		db.Put(key, value)
@@ -83,8 +83,8 @@ func main() {
 		log.Fatalf("Failed to initialize DB %v", err)
 	}
 
-	// TestInsertionAndRead(booksDb)
-	TestConcurrentInsertionAndRead(booksDb)
+	TestInsertionAndRead(booksDb)
+	// TestConcurrentInsertionAndRead(booksDb)
 
 	booksDb.CloseDB()
 	// booksDb.Cleanup()

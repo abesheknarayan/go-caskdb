@@ -144,7 +144,7 @@ func (d *DiskStore) MergeCompact(mergingSegment SegmentMetadata, level uint32) e
 		BytesOccupied: 0,
 		Map:           &memtable.HashMap{M: make(map[string]key_entry.KeyEntry), Mu: &sync.Mutex{}},
 		Mu:            &sync.Mutex{},
-		Wg:            &sync.WaitGroup{},
+		ExWaitGroup:   &memtable.ExclusiveWaitGroup{Wg: &sync.WaitGroup{}, Mu: &sync.Mutex{}},
 	}
 
 	for _, segment := range allSegments {
@@ -153,7 +153,7 @@ func (d *DiskStore) MergeCompact(mergingSegment SegmentMetadata, level uint32) e
 			BytesOccupied: 0,
 			Map:           &memtable.HashMap{M: make(map[string]key_entry.KeyEntry), Mu: &sync.Mutex{}},
 			Mu:            &sync.Mutex{},
-			Wg:            &sync.WaitGroup{},
+			ExWaitGroup:   &memtable.ExclusiveWaitGroup{Wg: &sync.WaitGroup{}, Mu: &sync.Mutex{}},
 		}
 		err := tempMemtable.LoadFromSegmentFile(segment.SegmentId)
 		if err != nil {
@@ -195,7 +195,7 @@ func (d *DiskStore) MergeCompact(mergingSegment SegmentMetadata, level uint32) e
 		BytesOccupied: 0,
 		Map:           &memtable.HashMap{M: make(map[string]key_entry.KeyEntry), Mu: &sync.Mutex{}},
 		Mu:            &sync.Mutex{},
-		Wg:            &sync.WaitGroup{},
+		ExWaitGroup:   &memtable.ExclusiveWaitGroup{Wg: &sync.WaitGroup{}, Mu: &sync.Mutex{}},
 	}
 
 	// delete all segments already present
