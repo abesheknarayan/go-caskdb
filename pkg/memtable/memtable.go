@@ -219,6 +219,17 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 	return uint32(len(sortedKeys)), exists, nil
 }
 
+// copies all the contents of mt2 onto mt1
+func (mt *MemTable) CopyMemtable(mt2 *MemTable) {
+	fmt.Println(mt, mt2)
+	mt.DbName = mt2.DbName
+	mt.BytesOccupied = mt2.BytesOccupied
+	mt.Map = mt2.Map
+	mt.SegmentId = mt2.SegmentId
+	mt.Mu = mt2.Mu
+	mt.Wg = mt2.Wg
+}
+
 func (mt *MemTable) Contains(key string) bool {
 	mt.Map.Mu.Lock()
 	defer mt.Map.Mu.Unlock()

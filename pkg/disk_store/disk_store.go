@@ -212,7 +212,8 @@ func (d *DiskStore) Put(key string, value string) {
 			d.AuxillaryMemtable.Mu.Unlock()
 		}
 		l.Infoln("Writing memtable to aux")
-		d.AuxillaryMemtable = d.Memtable
+		d.AuxillaryMemtable = memtable.GetNewMemTable(d.Manifest.DbName, d.Memtable.SegmentId)
+		d.AuxillaryMemtable.CopyMemtable(d.Memtable)
 		d.Memtable = memtable.GetNewMemTable(d.Manifest.DbName, int32(d.GetNewSegmentId()))
 
 		go func() {
@@ -222,7 +223,6 @@ func (d *DiskStore) Put(key string, value string) {
 			d.AuxillaryMemtable.Mu.Lock()
 			d.AuxillaryMemtable.Wg.Add(1)
 			d.AuxillaryMemtable.Mu.Unlock()
-			l.Debugln("here 1")
 
 			d.Manifest.Mu.Lock()
 			if d.Manifest.NumberOfLevels == 0 {
