@@ -53,22 +53,6 @@ func main() {
 		}
 	}
 
-	// for i := 0; i < 1000; i++ {
-	// 	// key := utils.GetRandomString(rand.Int()%10 + 1)
-	// 	// value := utils.GetRandomString(rand.Int()%10 + 1)
-	// 	key := fmt.Sprintf("Key %d", rand.Int()%3000)
-	// 	value := fmt.Sprintf("Value %d", rand.Int()%3000)
-	// 	// fmt.Println(key, value)
-	// 	booksDb.Put(key, value)
-	// }
-
-	// utils.Logger.Debugln(booksDb.Get("Key 123"))
-	// utils.Logger.Debugln(booksDb.Get("Key 33"))
-
-	// utils.Logger.Debugln(booksDb.Get("Key 477"))
-	// utils.Logger.Debugln(booksDb.Get("Key 1"))
-	// utils.Logger.Debugln(booksDb.Get("Key 930"))
-
 	booksDb.CloseDB()
 	// booksDb.Cleanup()
 }

@@ -85,7 +85,7 @@ func (mt *MemTable) Put(key string, value string) error {
 	}
 	newBytes := len(key) + len(value) + 8
 
-	if mt.BytesOccupied+uint64(newBytes-oldBytes) > config.MAX_MEMTABLE_SIZE {
+	if mt.BytesOccupied+uint64(newBytes-oldBytes) > config.Config.MemtableSizeLimit {
 		// copy all the memtable to segment file --> disk write
 		return CustomError.ErrMaxSizeExceeded
 	}

@@ -223,6 +223,7 @@ func (d *DiskStore) Put(key string, value string) {
 			d.AuxillaryMemtable.Wg.Add(1)
 			d.AuxillaryMemtable.Mu.Unlock()
 
+			d.Manifest.Mu.Lock()
 			if d.Manifest.NumberOfLevels == 0 {
 				d.Manifest.Mu.Lock()
 				d.Manifest.NumberOfLevels = 1
@@ -231,8 +232,8 @@ func (d *DiskStore) Put(key string, value string) {
 					Mu:       &sync.Mutex{},
 				})
 				d.InitMergeCompactor(0)
-				d.Manifest.Mu.Unlock()
 			}
+			d.Manifest.Mu.Unlock()
 
 			// send a compaction signal to level 0 channel which will be listening somewhere
 			cardinality, exists, err := d.AuxillaryMemtable.WriteMemtableToDisk() // this is the writing to disk function

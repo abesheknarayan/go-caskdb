@@ -96,9 +96,11 @@ func (d *DiskStore) AddSegmentToLevelAndPerformCompaction(nextLevel uint32) erro
 		}
 
 		// trigger everytime an insertion at next level happens
+		d.Manifest.Mu.Lock()
 		d.Manifest.SegmentLevels[currentLevel].Mu.Lock()
 		d.Manifest.SegmentLevels[currentLevel].Segments = d.Manifest.SegmentLevels[currentLevel].Segments[1:]
 		d.Manifest.SegmentLevels[currentLevel].Mu.Unlock()
+		d.Manifest.Mu.Unlock()
 
 		go d.WatchLevelForSizeLimitExceed(nextLevel)
 	} else {
@@ -211,6 +213,10 @@ func (d *DiskStore) MergeCompact(mergingSegment SegmentMetadata, level uint32) e
 	for key, keyEntry := range mergedMemtable.Map.M {
 		err := tempMemtable.Put(key, keyEntry.Value)
 		if err == CustomError.ErrMaxSizeExceeded {
+			if segmendIndex == 0 {
+				tempMemtable.Map.M[key] = keyEntry
+				continue
+			}
 			cardinality, _, err := tempMemtable.WriteMemtableToDisk()
 			if err != nil {
 				return fmt.Errorf("error while writing temporary memtable to disk")
