@@ -164,7 +164,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 	var l = utils.Logger.WithFields(logrus.Fields{
 		"method": "WriteMemtableToDisk",
 	})
-	l.Info("Writing Memtable to Segment file !!")
+	l.Infof("Writing Memtable %d to Segment file !!", mt.SegmentId)
 
 	path := config.Config.Path
 
@@ -178,6 +178,7 @@ func (mt *MemTable) WriteMemtableToDisk() (uint32, bool, error) {
 		// file doesnt exist
 		exists = false
 	}
+	l.Debugln(exists)
 
 	f, err := os.OpenFile(segmentFilePath, os.O_RDWR|os.O_CREATE, 0666)
 

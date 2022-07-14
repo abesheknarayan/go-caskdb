@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/abesheknarayan/go-caskdb/pkg/config"
 	"github.com/abesheknarayan/go-caskdb/pkg/utils"
@@ -38,6 +39,10 @@ func Test_Persistance(t *testing.T) {
 }
 
 func InsertAndRead(N int, t *testing.T) {
+	t_db, err := InitDb(fmt.Sprintf("normalDb%d", time.Now().Unix()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	m := make(map[string]string)
 	allKeys := make([]string, N)
 	for i := 0; i < N; i++ {
@@ -45,7 +50,7 @@ func InsertAndRead(N int, t *testing.T) {
 		value := utils.GetRandomString(rand.Int()%10 + 5)
 		allKeys = append(allKeys, key)
 		m[key] = value
-		db.Put(key, value)
+		t_db.Put(key, value)
 	}
 
 	numChecks := rand.Intn(N-1) + 1
@@ -59,25 +64,26 @@ func InsertAndRead(N int, t *testing.T) {
 		if !exists {
 			continue
 		}
-		nval := db.Get(nKey)
+		nval := t_db.Get(nKey)
 		assert.Equal(t, val, nval, "Values are not equal!!")
 	}
 }
 func Test_InsertionFirstAndReads(t *testing.T) {
-	// N := 100000
-	// config.Config.MemtableSizeLimit = 4 * 1024 * 1024
-	// InsertAndRead(N, t)
-
-	// db.Cleanup()
-	N := 1000
+	N := 100000
+	config.Config.MemtableSizeLimit = 4 * 1024 * 1024
+	InsertAndRead(N, t)
+	N = 10000
 	config.Config.MemtableSizeLimit = 4 * 1024
 	InsertAndRead(N, t)
-	db.Cleanup()
 }
 
 func InsertWithConcurrentReads(N int, M int, t *testing.T) {
 	m := make(map[string]string)
 	var allKeys []string
+	t_db, err := InitDb(fmt.Sprintf("concurrentDb%d", time.Now().Unix()))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for i := 0; i < N; i++ {
 		x := rand.Int() % 2
@@ -89,7 +95,7 @@ func InsertWithConcurrentReads(N int, M int, t *testing.T) {
 				value := fmt.Sprintf("Value: %d", (rand.Int()%M + 1))
 				m[key] = value
 				allKeys = append(allKeys, key)
-				db.Put(key, value)
+				t_db.Put(key, value)
 			}
 		case 1:
 			{
@@ -101,7 +107,7 @@ func InsertWithConcurrentReads(N int, M int, t *testing.T) {
 				if !exists {
 					continue
 				}
-				nval := db.Get(nKey)
+				nval := t_db.Get(nKey)
 				assert.Equal(t, val, nval, "Values are not equal!!")
 			}
 		}
@@ -113,12 +119,10 @@ func Test_InsertionWithConcurrentReads(t *testing.T) {
 	M := 3167
 	config.Config.MemtableSizeLimit = 4 * 1024 * 1024
 	InsertWithConcurrentReads(N, M, t)
-	db.Cleanup()
 	N = 10000
 	M = 967
 	config.Config.MemtableSizeLimit = 4 * 1024
 	InsertWithConcurrentReads(N, M, t)
-	db.Cleanup()
 }
 
 func BenchmarkInsertionAlone100000(b *testing.B) {
